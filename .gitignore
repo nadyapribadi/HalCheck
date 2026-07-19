@@ -1,0 +1,24 @@
+# Secrets
+.env
+.env.local
+network/wallet/
+network/crypto-config/
+*.pem
+*.key
+
+# Runtime data
+logs/
+*.log
+postgres-data/
+couchdb-data/
+minio-data/
+backups/
+
+# Dependencies / build output
+node_modules/
+dist/
+build/
+
+# OS/editor cruft
+.DS_Store
+.vscode/settings.json
