@@ -216,3 +216,71 @@ Every error is plain language, never a raw backend reason code shown directly.
 - Export Request Form showing read-only Intended Market display
 - Tablet width: BatchTrailView collapsed/expanded, RoleContextBar wrap behavior
 - Mobile: view-only redirect message on a data-entry attempt
+
+---
+
+## Core Screening App UI Specification
+
+*The following section covers HALCHECK's other module — the Core Screening App, the engine Compliance Trail wraps. Module: Core Screening App. Status: Design in progress.*
+
+### 18. Direction
+
+Same visual identity Section 1 above already commits to matching — this section is what it's matching *against*. Evidentiary, not decorative; plain language; no crypto-visual or lab-report clichés, since this is a screening tool, not a certificate generator.
+
+### 19. Visual Principles
+
+- Every Finding is traceable — a Fail is never shown without its rule citation and flagged ingredient visible in the same view.
+- Status shown as plain text/color, consistent with the `--status-pass`/`--status-fail` tokens defined in Section 4 (reused directly, not redefined, since both modules are one product).
+- Reference data (standards, ingredients, recognition agreements) is always inspectable — a user should never have to trust a Finding without being able to look up the rule it cites.
+
+### 20. Design Tokens
+
+Reuses the token set from Section 4 directly — `--status-pass`, `--status-fail`, `--status-pending`, `--text-primary`/`--text-secondary`, `--border`, the spacing scale, `--radius`. No separate token set is defined for this app; one visual system serves both modules, per Section 1's principle that Compliance Trail "reads as related to the product, not a visually separate app."
+
+### 21. Screens
+
+| Screen | Route (indicative) | Maps to feature module |
+|---|---|---|
+| Profile Setup | `/` | `profiles` |
+| Ingredient Intake | `/intake` | `intake` |
+| Reference Browser | `/reference` | `reference` |
+| Screening Run / Results | `/screening` | `screening` (engine) |
+| Report | `/report` | `report` |
+
+### 22. Profile Setup
+
+**Fields:** Intended Market (`SearchableSelect`: Indonesia/BPJPH, Malaysia/JAKIM), Product Type (`SearchableSelect`, from active dataset release).
+**Actions:** Start Screening → Ingredient Intake.
+**Rule:** Intended Market is locked once a run exists on this profile (FRD-CORE-PROFILE-002); changing it starts a new profile.
+
+### 23. Ingredient Intake
+
+**Fields:** Ingredient Name (`SearchableSelect`), Source/Supplier (`SearchableSelect`), Halal Risk Flag (auto-populated, overridable with required reason), Certificate Issuing Body (optional, `SearchableSelect`: BPJPH / JAKIM / none).
+**Bulk entry:** paste/import table, per-row validation, per-row removal before running screening — the same interaction pattern as `IngredientUploadPanel` (Section 6), reused for visual consistency.
+**Actions:** Add ingredient, Remove (per row), Run Screening.
+
+### 24. Reference Browser
+
+**Displayed:** four tabs — Standards, Ingredients, Suppliers, Recognition Agreements — each a read-only table, active dataset release version shown at the top of the screen.
+**No actions** beyond viewing — this app never writes reference data (see `12_seed_data_specification.md`, Core Screening App Dataset Specification section, §1, for how releases are authored).
+
+### 25. Screening Run / Results
+
+**Displayed:** overall status (Pass/Fail, `--status-pass`/`--status-fail`), then every Finding grouped by rule — result, citation, rationale, flagged ingredient (if fail), recognition detail (if applicable) — shown inline, not collapsed by default, matching Section 2's "Fail states as legible as Pass" principle.
+**Actions:** View Report, Start New Profile.
+
+### 26. Report
+
+**Displayed:** same Finding list as Screening Run, plus dataset release version, engine version, and a fixed disclaimer line. This is deterministic engine output, not AI-generated, so it uses standard `--text-secondary` styling — the `--ai-accent` token stays reserved solely for Compliance Trail's AI Explanation feature, never reused here.
+**Actions:** Export (print/PDF or file export), Start New Profile.
+**Disclaimer copy (fixed, every render):** "This is a screening opinion, not a certification, and not a religious ruling."
+
+### 27. Interaction Rules
+
+- No screen introduces a field not implied by an FRD-CORE requirement (mirrors Section 11's governing rule for Compliance Trail screens).
+- A rejected intake value ("Not a recognized ingredient/supplier") shows inline, never as a toast, matching Section 11's rejection-is-inline convention.
+- Recognition-directionality outcomes are always labeled explicitly by name ("Recognition check: JAKIM → BPJPH — not recognized"), never folded into a generic fail message, matching PRD-CORE-005.
+
+### 28. Accessibility
+
+Same rules as Section 16 above: color is never the sole status indicator, focus-visible outline is always present, and every disabled action carries a plain-text reason.

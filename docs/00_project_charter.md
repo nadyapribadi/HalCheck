@@ -156,3 +156,84 @@ design -> chaincode design gate (P1.5) -> chaincode -> backend/data
 - `21_decisions.md` — 26 ADR entries
 - `22_requirements_traceability.md` — full PRD-to-implementation matrix
 - `23_roadmap.md` — versioned build path and deferred scope
+
+---
+
+## Core Screening App Charter
+
+*The following section is a charter for HALCHECK's other module — the Core Screening App — merged here rather than kept as a separate document. Module: Core Screening App. Status: Design in progress.*
+
+### Relationship to Compliance Trail
+
+The Core Screening App is the product HALCHECK actually screens with. Compliance Trail (this document, and the rest of the suite above) is a planned accountability wrapper around this engine's output — it does not reimplement or duplicate the screening logic (BRD Rule 5, ADR-CT-004). Every reference elsewhere in this suite to "the existing compliance engine," or to "the engine's Pass/Fail output is binding" (FRD-CHAIN-VERDICT-001/005), refers to this app's `evaluate()` function specifically.
+
+### Executive Summary
+
+A fast, sourced, step-level comparison of a product's ingredient sourcing against two national halal certification standards — BPJPH (Indonesia) and JAKIM (Malaysia) — for a fictional cosmetics supply chain. Rather than a single opaque pass/fail, the engine produces one Finding per rule, each citing the specific rule and the specific supply-chain fact responsible.
+
+### Mission
+
+Give a contract manufacturer or brand owner a legible answer to "where does this product's sourcing fall short, against which rule, and why" — deterministically, explainably, and without assuming that recognition between two certifying bodies is ever automatic or symmetric.
+
+### Product Statement
+
+```text
+Two standards. One supply chain.
+Every finding traces to a rule and a fact, not a guess.
+Screening opinion, not certification, not religious ruling — stated on every export.
+```
+
+### Guiding Principles
+
+1. The engine is pure — same inputs always produce the same outputs, no network calls, no hidden state.
+2. Every finding cites the specific rule and the specific supply-chain fact that produced it.
+3. Recognition between certifying bodies is never assumed symmetric — checked explicitly, in both directions, every time.
+4. Reference data (standards, ingredient risk classifications, recognition agreements) is versioned and frozen at release; a screening run always records which version it used.
+5. No AI in the verdict path — the rules engine is deterministic and fully inspectable.
+6. All domain content (standards, ingredients, certificates) is fictional and clearly labeled as such; this is a demonstration engine, not a source of real regulatory guidance.
+
+### Goals
+
+- Produce a deterministic, explainable Pass/Fail-per-rule evaluation for a synthetic product/supply-chain profile against BPJPH and JAKIM rule sets.
+- Support the recognition-directionality mechanic concretely — a certificate issued under one body doesn't automatically satisfy a rule owned by another.
+- Ship as a static, backend-free, browser-only app with versioned JSON reference data and local-only storage.
+- Produce output in the exact shape Compliance Trail's `VERDICT_RECORD` expects (status, governing regulation, fail reason, flagged record, recognition check, engine version, rules release), so Compliance Trail can wrap this engine's output without a translation-layer guess.
+
+### Non-Goals
+
+- No real regulatory claim — standards, ingredient risk classifications, and recognition agreements in this repository are fictional, for demonstration only.
+- No login, backend, or server database (matches the existing HALCHECK README runtime principle).
+- No AI involvement anywhere in the evaluation path.
+- No bulk/multi-profile batch screening in v1 — one profile, one run.
+- No edit-in-place of a completed screening run — a changed profile is a new run.
+
+### Stakeholders
+
+| Stakeholder | Need |
+|---|---|
+| Brand/contract-manufacturer user | A fast, legible answer to "where does this product's sourcing fall short, against which rule, and why" |
+| Compliance Trail (downstream consumer) | A stable, versioned Pass/Fail + rationale contract to wrap with attestation, per TRD §23.2 |
+| External reviewer/evaluator | Confidence that findings are traceable to specific rules and facts, not black-box output |
+| Solo developer | A spec thorough enough that the engine's behavior doesn't have to be re-derived from memory |
+
+### Success Criteria
+
+- `evaluate(target, rule, recognitions)` produces a `Finding` for every rule in the active dataset release applicable to a given screening profile.
+- Every `Finding` cites: the rule ID, the specific ingredient/supply-chain record that produced it, and — if a recognition check applied — the issuing/requiring body pair and result.
+- Given the same dataset release version and profile input, the same output is produced every time (pure function: no side effects, no network calls, no timestamp-dependent logic beyond what's supplied as input).
+- The synthetic Selara/SL-2026-00x scenarios already defined in `12_seed_data_specification.md` evaluate correctly under this engine, without requiring that document's stated outcomes to change.
+
+### Core Decisions
+
+| Area | Decision |
+|---|---|
+| Runtime | Static React 19 + TypeScript, no backend, no server database (per README) |
+| Data | Versioned JSON dataset releases (`dataset/releases/`), frozen once published |
+| Storage | Browser local storage only, per-session/profile |
+| Engine | Pure function core (`src/engine/`), no I/O, fully unit-testable |
+| Rule content | Fictional/synthetic, explicitly labeled, aligned with the Selara/SL-2026-00x seed data in `12_seed_data_specification.md` |
+| Output contract | Matches Compliance Trail's `VERDICT_RECORD` shape exactly (see `06_erd.md`, Core Screening App Data Model section, §5) |
+
+### Why This Section Is Shorter Than the Compliance Trail Suite Above
+
+Compliance Trail's documentation exists at this depth because it makes an accountability claim (tamper-evidence, role enforcement) that only holds if implementation matches design exactly, across a ledger, an identity layer, and a public tunnel. The Core Screening App is a pure client-side function with no network surface, no credentials, and no multi-party trust boundary — a materially smaller risk profile. Its documentation, folded into this same suite below, is scoped accordingly: no separate BRD (business rationale sits here and in the PRD section), no Security Threat Model or Test Strategy section (engine testability is a single inline requirement, not a document's worth of matrices).

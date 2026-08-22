@@ -73,7 +73,21 @@ Log, which is insert-only at the database grant level.
 
 ## Current Work Context
 
-Status: Design complete. Build not started. Do not run Fabric/setup/build
-commands until the documentation/repo-hygiene pass is accepted. After that,
-the next build step is Implementation Plan P0 (local network foundation) —
-see `docs/13_implementation_plan.md`.
+Status: Design complete. Repo-hygiene pass accepted (`docs/19_repository_structure.md`
+§11). Build started — Implementation Plan P0 (local network foundation) is
+in progress, see `docs/13_implementation_plan.md`.
+
+**P0 progress (outside this repo — no HALCHECK source files changed yet):**
+- Fabric samples checkout pinned at `05edea01…`.
+- Local toolchain verified; Fabric peer v2.5.15 installed/verified.
+- CA-backed temporary test network started; `compliancetrail` channel created and joined.
+- Official `basicgo` sample chaincode installed and approved on both peers.
+
+**Blocked:** committing the `basicgo` chaincode definition, pending a Codex
+usage-limit reset. The temporary network is left running outside the repo.
+
+**Still needed to close P0:**
+1. Commit the `basicgo` definition.
+2. Submit and query a sample asset transaction.
+3. Record the proven versions/commands in `docs/14_developer_setup.md`.
+4. Re-check P0's stated exit criteria (`docs/13_implementation_plan.md` P0) once the above land.

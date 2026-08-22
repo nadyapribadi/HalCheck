@@ -192,3 +192,141 @@ Not a full entity in the traditional sense — more a lookup convention than a t
 - No `NOTIFICATION` entity — the "N batches awaiting your action" indicator is computed on read from existing Batch List filtering logic.
 - No separate `HASH_LOG` or blockchain-internal structures — those are Fabric's own internal ledger mechanics.
 - No correction record type beyond ingredients and production is modeled; a Fail must identify one of those concrete upstream record types.
+
+---
+
+## Core Screening App Data Model
+
+*The following section covers HALCHECK's other module — the Core Screening App, the engine Compliance Trail wraps. Module: Core Screening App. Status: Design in progress.*
+
+### 6. Purpose
+
+Defines every entity `src/engine/types.ts` needs, and the exact shape of the engine's output — deliberately matched field-for-field to the `VERDICT_RECORD` entity above, so its assumption of "the existing compliance engine" has a concrete contract behind it.
+
+### 7. Diagram
+
+```mermaid
+erDiagram
+    DATASET_RELEASE ||--o{ STANDARD_RULE : contains
+    DATASET_RELEASE ||--o{ INGREDIENT_ENTRY : contains
+    DATASET_RELEASE ||--o{ SUPPLIER_ENTRY : contains
+    DATASET_RELEASE ||--o{ RECOGNITION_AGREEMENT : contains
+    SCREENING_PROFILE ||--o{ INGREDIENT_RECORD : has
+    SCREENING_PROFILE ||--|| SCREENING_RUN : produces
+    SCREENING_RUN ||--o{ FINDING : contains
+    FINDING }o--|| STANDARD_RULE : evaluates
+    FINDING }o--o| INGREDIENT_RECORD : flags
+    FINDING }o--o| RECOGNITION_AGREEMENT : "resolved via, if applicable"
+    INGREDIENT_RECORD }o--|| INGREDIENT_ENTRY : "resolved from"
+    INGREDIENT_RECORD }o--|| SUPPLIER_ENTRY : "resolved from"
+
+    DATASET_RELEASE {
+        string release_id PK "e.g. 2026.07"
+        datetime frozen_at
+        string status "enum: draft | verified | released"
+    }
+
+    STANDARD_RULE {
+        string rule_id PK
+        string standard "enum: BPJPH | JAKIM | CPKB"
+        string citation "fictional regulation reference"
+        string applies_to_market "enum: indonesia | malaysia"
+        string requirement_type "enum: ingredient_source | certificate | line_segregation"
+        json condition "structured predicate the engine evaluates"
+    }
+
+    INGREDIENT_ENTRY {
+        string entry_id PK
+        string name
+        boolean default_halal_risk
+        string risk_note "nullable, e.g. source-ambiguity explanation"
+    }
+
+    SUPPLIER_ENTRY {
+        string entry_id PK
+        string name
+        string verification_status "enum: verified | unverified"
+    }
+
+    RECOGNITION_AGREEMENT {
+        string agreement_id PK
+        string issuing_body "enum: BPJPH | JAKIM"
+        string requiring_body "enum: BPJPH | JAKIM"
+        boolean recognized
+        date as_of_date
+        string note
+    }
+
+    SCREENING_PROFILE {
+        string profile_id PK
+        string intended_market "enum: indonesia | malaysia"
+        string product_type
+        datetime created_at
+    }
+
+    INGREDIENT_RECORD {
+        string record_id PK
+        string profile_id FK
+        string ingredient_entry_id FK
+        string supplier_entry_id FK
+        boolean halal_risk_flag
+        string override_reason "nullable"
+        string certificate_issuing_body "nullable, enum: BPJPH | JAKIM"
+    }
+
+    SCREENING_RUN {
+        string run_id PK
+        string profile_id FK
+        string dataset_release_id FK
+        string engine_version
+        string overall_status "enum: pass | fail"
+        datetime run_at
+    }
+
+    FINDING {
+        string finding_id PK
+        string run_id FK
+        string rule_id FK
+        string result "enum: pass | fail | not_applicable"
+        string flagged_record_id FK "nullable, set only on fail"
+        string fail_reason "nullable, from the shared Fail Reason catalog"
+        string recognition_agreement_id FK "nullable, set only when a recognition check applied"
+        string rationale_text "deterministically generated, not free text"
+    }
+```
+
+### 8. Entity Dictionary
+
+**`DATASET_RELEASE`** — A frozen, versioned snapshot of all reference content — mirrors `dataset/releases/` on disk. `status` tracks its position in the dataset pipeline (briefs → drafts → verified → releases, see `12_seed_data_specification.md`, Core Screening App Dataset Specification section, §1); only `released` content is ever evaluated against by a real screening run.
+
+**`STANDARD_RULE`** — One evaluable unit. `condition` is a structured predicate (not free text or code) the engine interprets — e.g. "ingredient's `default_halal_risk` is true AND matched supplier's `verification_status` is not `verified`" → fail. Keeping conditions structured is what makes `evaluate()` a pure, inspectable function rather than an opaque black box.
+
+**`RECOGNITION_AGREEMENT`** — The entity that makes recognition-directionality concrete and queryable rather than implicit in code. Deliberately not assumed symmetric: `BPJPH → JAKIM` and `JAKIM → BPJPH` are two separate rows, and only one may say `recognized: true` — see `12_seed_data_specification.md`, Core Screening App Dataset Specification section, §5 for the actual synthetic content.
+
+**`SCREENING_PROFILE` / `INGREDIENT_RECORD`** — Local, ephemeral, browser-only — the equivalent of the `BATCH`/`INGREDIENT_RECORD` pair above, but without ledger backing, since this app has no accountability claim of its own (Compliance Trail adds that layer separately, on top of this engine's output).
+
+**`SCREENING_RUN` / `FINDING`** — `SCREENING_RUN.overall_status` and `FINDING[]` together are exactly the payload Compliance Trail's backend turns into a signed engine attestation (TRD §23.2) before `batch.RecordVerdict` verifies it. `FINDING.flagged_record_id`, `fail_reason`, and `recognition_agreement_id` map directly onto `VERDICT_RECORD.flagged_record_id`, `fail_reason_snapshot`, and `recognition_check` respectively (see §10 below).
+
+### 9. Cardinality Notes
+
+- One `SCREENING_PROFILE` produces exactly one `SCREENING_RUN` at a time; a changed profile after a run exists is a new profile (FRD-CORE-PROFILE-002), not a mutation.
+- `FINDING` to `RECOGNITION_AGREEMENT` is optional — populated only when `STANDARD_RULE.requirement_type = certificate` and the target's certificate issuing body differs from the rule's own standard body.
+- `FINDING` to `INGREDIENT_RECORD` (via `flagged_record_id`) is optional — populated only on `fail`.
+
+### 10. Output Contract for Compliance Trail
+
+| Core Screening App field | Compliance Trail `VERDICT_RECORD` field |
+|---|---|
+| `SCREENING_RUN.overall_status` | `status` |
+| `STANDARD_RULE.citation` (of the governing rule) | `regulation_snapshot` |
+| `SCREENING_RUN.dataset_release_id` | `rules_release` |
+| `SCREENING_RUN.engine_version` | `engine_version` |
+| `FINDING.fail_reason` (first fail, if any) | `fail_reason_snapshot` |
+| `FINDING.flagged_record_id` | `flagged_record_id` |
+| `RECOGNITION_AGREEMENT` fields on the resolving Finding | `recognition_check` (`issuing_body`, `requiring_body`, `recognized`, `as_of_date`) |
+
+### 11. What's Deliberately Not Modeled
+
+- No user/session entity — this app has no login (matches the HALCHECK README's existing runtime principle).
+- No cross-run history entity — each run is independent; comparing runs is a report-layer concern, not a data-model one, in v1.
+- No live foreign key from `INGREDIENT_RECORD` to `INGREDIENT_ENTRY` across dataset releases — a record always resolves against the release active at intake time, matching the snapshot-not-live-reference principle above (TRD §5).

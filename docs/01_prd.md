@@ -133,3 +133,93 @@ Contract manufacturing has documented failure points that plain record-keeping d
 - LLM provider selection: criterion is stated in TRD (instruction-following/refusal reliability over raw capability); specific provider left to Build-time selection.
 
 **Resolved in v0.2.0:** the recognition-edge-case journey now has a concrete supporting FRD requirement via FRD-CHAIN-BATCH-001, because Intended Market must exist before verdict computation.
+
+---
+
+## Core Screening App PRD
+
+*The following section covers HALCHECK's other module — the Core Screening App, the engine Compliance Trail wraps. Module: Core Screening App. Status: Design in progress.*
+
+### 1. Purpose / Vision
+
+Let a user describe a fictional product's supply chain once, then see — rule by rule, ingredient by ingredient — where it stands against BPJPH and JAKIM's cosmetics-halal requirements, with every finding traceable to a specific rule and a specific supply-chain fact.
+
+### 2. Problem Statement
+
+A halal compliance comparison across two standards bodies is normally a manual cross-referencing exercise: someone has to know both rule sets, know which one governs which market, know when a certificate from one body satisfies — or doesn't — a requirement owned by the other, and do this consistently across every ingredient in a formulation. Manual review is slow, inconsistent between reviewers, and rarely records *why* a particular ingredient was flagged — only that it was.
+
+### 3. Goals
+
+1. Accept a fictional product's ingredient list and sourcing detail as structured input (no free text where a bounded set exists).
+2. Evaluate that input against a versioned set of BPJPH and JAKIM rules for a selected intended market.
+3. Apply recognition-directionality explicitly wherever a certificate crosses a body boundary — never assume symmetric recognition.
+4. Produce a Finding per rule, each citing the specific rule and the specific ingredient/sourcing fact responsible.
+5. Let a user export a report carrying the fixed disclaimer (screening opinion, not certification, not religious ruling) and the dataset/engine version used.
+6. Run entirely in the browser — no account, no server round-trip, no persistence beyond local storage.
+
+### 4. Non-Goals
+
+- No real regulatory authority or endorsement claim.
+- No login/accounts/multi-user state.
+- No bulk/multi-product screening in one run.
+- No AI-generated content anywhere in the evaluation or report path.
+- No edit of a completed run's findings — a new input produces a new run.
+
+### 5. Target Users / Personas
+
+| User | Core need |
+|---|---|
+| Brand/QA reviewer (fictional persona, reused from Compliance Trail: Siti Rahayu) | Enter a product's ingredients and sourcing, get a clear, sourced pass/fail per rule |
+| Compliance reviewer (fictional persona: Nurul Aisyah) | Confirm which specific rule and ingredient triggered any fail, before recording a downstream decision |
+| Demo viewer / evaluator | See that a finding is traceable to an actual rule and fact, not an opaque score |
+
+### 6. Product Requirements
+
+| ID | Requirement | Priority |
+|---|---|---|
+| PRD-CORE-001 | User can define a screening profile: intended market (Indonesia/BPJPH, Malaysia/JAKIM), product type. | P0 |
+| PRD-CORE-002 | User can add ingredients to a profile from the active dataset release's ingredient reference list, with source/supplier selected from a controlled list, not free text. | P0 |
+| PRD-CORE-003 | System evaluates every applicable rule in the active dataset release against the profile's ingredients and produces one Finding per rule. | P0 |
+| PRD-CORE-004 | Each Finding states: rule ID and citation, result (pass/fail/not-applicable), the specific ingredient/sourcing record responsible (if fail), and a plain-language rationale. | P0 |
+| PRD-CORE-005 | Where a rule's satisfaction depends on a certificate issued by a different certifying body than the one governing the intended market, the system evaluates recognition explicitly (issuing body, requiring body, recognized yes/no, as-of date) rather than assuming it. | P0 |
+| PRD-CORE-006 | A completed screening run records the dataset release version and engine version used, immutably. | P0 |
+| PRD-CORE-007 | User can view the full reference content (standards, ingredient risk classifications, recognition agreements) the active dataset release evaluates against, before or after running a screening. | P1 |
+| PRD-CORE-008 | User can export a screening report; every export carries the fixed disclaimer: screening opinion, not certification, not religious ruling. | P0 |
+| PRD-CORE-009 | A screening run persists to local browser storage only; no server round-trip at any point in the intake → screening → report flow. | P0 |
+| PRD-CORE-010 | All domain content (standards, ingredients, recognition agreements) is visibly labeled as fictional/demonstration content, not real regulatory guidance. | P0 |
+
+### 7. Key User Journeys
+
+1. **Happy path** — user builds a profile (Malaysia market), adds 6 known-clear ingredients from the reference list, runs screening, sees all rules pass, exports a clean report.
+2. **Gap-finding path** — user adds an ingredient with an unverified-source supplier; the relevant rule fails; the report shows exactly which ingredient/supplier combination and which rule caused it.
+3. **Recognition-edge path** — user selects Indonesia as the intended market for a product whose only certificate was issued by JAKIM, not BPJPH; the engine evaluates the JAKIM→BPJPH recognition explicitly and the report shows the recognition outcome as its own labeled finding, not folded into a generic fail reason.
+4. **Reference browse** — user inspects the active dataset release's ingredient list and recognition agreements before adding anything, to understand what the engine will check against.
+
+### 8. Success Metrics
+
+- All 4 journeys in Section 7 complete end-to-end without a server dependency.
+- Every Finding shown in the UI is reproducible by calling `evaluate()` directly with the same inputs — used as the engine's own test oracle.
+- A reviewer can trace any Fail finding back to one specific rule ID and one specific ingredient/sourcing record, without reading engine source code.
+
+### 9. Release Criteria
+
+| Phase | Criteria |
+|---|---|
+| Design | This PRD section + FRD/ERD/UI-spec/dataset-spec sections complete |
+| Build | `evaluate()`/`rationale()` implemented and unit-tested against the seeded SL-2026-00x scenarios; intake/profile/reference/screening/report screens functional |
+| Test | All journeys in Section 7 pass; engine output matches Compliance Trail's expected `VERDICT_RECORD` shape for the same seeded batches |
+
+### 10. Dependencies
+
+- None external — this app has no backend, no third-party API, no AI call.
+- Downstream: Compliance Trail's verdict-attestation flow (TRD §23.2) depends on this engine's output shape being stable — see `06_erd.md`, Core Screening App Data Model section, §5.
+
+### 11. Assumptions
+
+- All domain content is synthetic; no claim of real regulatory accuracy is made or implied anywhere in the product.
+- A single local user per session; no concurrent-editing or multi-user conflict handling is needed, since there is no backend to arbitrate it.
+
+### 12. Open Questions
+
+- Should a screening run be shareable (exportable/importable as a file) across browser sessions, or is local-storage-only sufficient for v1? Left to Build-time UX decision; doesn't block engine design.
+- Should the recognition-agreement table support more than two certifying bodies in a future version? Out of scope for v1 (BPJPH/JAKIM only).
