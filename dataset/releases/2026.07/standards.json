@@ -1,0 +1,37 @@
+[
+  {
+    "ruleId": "BPJPH-ING-001",
+    "standard": "BPJPH Halal Requirement",
+    "citation": "PP 42/2024",
+    "appliesToMarket": "indonesia",
+    "requirementType": "ingredient_source"
+  },
+  {
+    "ruleId": "BPJPH-CERT-001",
+    "standard": "BPJPH Halal Requirement",
+    "citation": "PP 42/2024",
+    "appliesToMarket": "indonesia",
+    "requirementType": "certificate"
+  },
+  {
+    "ruleId": "JAKIM-ING-001",
+    "standard": "JAKIM Halal Requirement",
+    "citation": "JAKIM HC-2024",
+    "appliesToMarket": "malaysia",
+    "requirementType": "ingredient_source"
+  },
+  {
+    "ruleId": "JAKIM-CERT-001",
+    "standard": "JAKIM Halal Requirement",
+    "citation": "JAKIM HC-2024",
+    "appliesToMarket": "malaysia",
+    "requirementType": "certificate"
+  },
+  {
+    "ruleId": "CPKB-PROD-001",
+    "standard": "CPKB Manufacturing Standard",
+    "citation": "BPOM Regulation No. 33/2021",
+    "appliesToMarket": "indonesia",
+    "requirementType": "line_segregation"
+  }
+]

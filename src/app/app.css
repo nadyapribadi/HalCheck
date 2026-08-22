@@ -1,0 +1,208 @@
+/* Design tokens per docs/09_ui_specification.md — reused, not redefined, so
+   the Core Screening App and Compliance Trail read as one visual system. */
+:root {
+  --status-pass: #1a7f37;
+  --status-fail: #cf222e;
+  --status-pending: #9a6700;
+  --status-not-applicable: #6e7781;
+  --text-primary: #1b1f23;
+  --text-secondary: #57606a;
+  --border: #d0d7de;
+  --bg-surface: #ffffff;
+  --bg-page: #f6f8fa;
+  --radius: 4px;
+  --space-xs: 4px;
+  --space-sm: 8px;
+  --space-md: 16px;
+  --space-lg: 24px;
+  --space-xl: 32px;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  background: var(--bg-page);
+  color: var(--text-primary);
+  font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+}
+
+main {
+  max-width: 1200px;
+  margin: 0 auto;
+  padding: var(--space-xl) var(--space-lg);
+}
+
+.screen {
+  background: var(--bg-surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: var(--space-lg);
+}
+
+h1 {
+  font-size: 24px;
+  margin-top: 0;
+}
+
+.disclaimer,
+.meta {
+  color: var(--text-secondary);
+  font-size: 14px;
+}
+
+form label {
+  display: block;
+  margin-bottom: var(--space-md);
+  font-size: 14px;
+}
+
+form select {
+  display: block;
+  width: 100%;
+  margin-top: var(--space-xs);
+  padding: var(--space-sm);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  font-size: 16px;
+}
+
+button {
+  padding: var(--space-sm) var(--space-md);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg-surface);
+  cursor: pointer;
+  font-size: 14px;
+}
+
+button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.record-table {
+  width: 100%;
+  border-collapse: collapse;
+  margin-bottom: var(--space-lg);
+}
+
+.record-table th,
+.record-table td {
+  text-align: left;
+  padding: var(--space-sm);
+  border-bottom: 1px solid var(--border);
+  font-size: 14px;
+}
+
+.record-table .empty {
+  color: var(--text-secondary);
+}
+
+.add-ingredient-form {
+  border-top: 1px solid var(--border);
+  padding-top: var(--space-md);
+  margin-bottom: var(--space-md);
+}
+
+.overall-status {
+  font-size: 20px;
+  font-weight: 600;
+}
+
+.status-pass {
+  color: var(--status-pass);
+}
+
+.status-fail {
+  color: var(--status-fail);
+}
+
+.status-not_applicable {
+  color: var(--status-not-applicable);
+}
+
+.finding-list {
+  list-style: none;
+  padding: 0;
+}
+
+.finding {
+  border: 1px solid var(--border);
+  border-left-width: 4px;
+  border-radius: var(--radius);
+  padding: var(--space-md);
+  margin-bottom: var(--space-sm);
+}
+
+.finding.status-pass {
+  border-left-color: var(--status-pass);
+}
+
+.finding.status-fail {
+  border-left-color: var(--status-fail);
+}
+
+.finding.status-not_applicable {
+  border-left-color: var(--status-not-applicable);
+}
+
+.finding-header {
+  margin: 0 0 var(--space-xs) 0;
+  font-weight: 600;
+}
+
+.finding-rationale {
+  margin: 0 0 var(--space-xs) 0;
+  color: var(--text-secondary);
+}
+
+.finding-flagged {
+  margin: 0;
+  font-weight: 600;
+}
+
+.app-nav {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: var(--space-lg);
+}
+
+.app-title {
+  font-weight: 600;
+  color: var(--text-secondary);
+  font-size: 14px;
+}
+
+.screen-actions {
+  display: flex;
+  gap: var(--space-sm);
+}
+
+.tab-bar {
+  display: flex;
+  gap: var(--space-xs);
+  margin-bottom: var(--space-md);
+  border-bottom: 1px solid var(--border);
+}
+
+.tab-bar button {
+  border-radius: var(--radius) var(--radius) 0 0;
+  border-bottom: none;
+}
+
+.tab-bar button.tab-active {
+  background: var(--bg-page);
+  font-weight: 600;
+}
+
+@media print {
+  .app-nav,
+  .tab-bar,
+  .screen-actions {
+    display: none;
+  }
+}

@@ -1,0 +1,18 @@
+[
+  {
+    "agreementId": "rec-bpjph-to-jakim",
+    "issuingBody": "BPJPH",
+    "requiringBody": "JAKIM",
+    "recognized": true,
+    "asOfDate": "2025-01-01",
+    "note": "Malaysia recognizes Indonesian BPJPH certification for BPJPH-certified imports."
+  },
+  {
+    "agreementId": "rec-jakim-to-bpjph",
+    "issuingBody": "JAKIM",
+    "requiringBody": "BPJPH",
+    "recognized": false,
+    "asOfDate": "2025-01-01",
+    "note": "Indonesia does not automatically recognize Malaysian JAKIM certification for products marketed domestically — no reciprocal agreement modeled."
+  }
+]

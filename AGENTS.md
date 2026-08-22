@@ -17,11 +17,15 @@ Full detail: `docs/18_vibe_coding_guardrails.md` — read this before touching
 
 ## Commands
 
-(To be filled in once Build starts — see `docs/14_developer_setup.md` for
-the current install/run steps.)
-
 ```bash
-# Chaincode
+# Core Screening App engine (real — implemented against docs/03_frd.md's
+# Core Screening App FRD section)
+npm install
+npm test          # vitest — evaluate()/rationale()/runScreening() against
+                   # the three canonical SL-2026-00x scenarios (docs/12)
+npm run typecheck
+
+# Chaincode (not yet implemented — see docs/13_implementation_plan.md P2)
 cd chaincode/batch && go test ./...
 cd chaincode/refdata && go test ./...
 
@@ -74,20 +78,50 @@ Log, which is insert-only at the database grant level.
 ## Current Work Context
 
 Status: Design complete. Repo-hygiene pass accepted (`docs/19_repository_structure.md`
-§11). Build started — Implementation Plan P0 (local network foundation) is
-in progress, see `docs/13_implementation_plan.md`.
+§11). Build in progress on both modules:
 
-**P0 progress (outside this repo — no HALCHECK source files changed yet):**
-- Fabric samples checkout pinned at `05edea01…`.
-- Local toolchain verified; Fabric peer v2.5.15 installed/verified.
-- CA-backed temporary test network started; `compliancetrail` channel created and joined.
-- Official `basicgo` sample chaincode installed and approved on both peers.
+### Core Screening App — functionally complete for v1 scope
 
-**Blocked:** committing the `basicgo` chaincode definition, pending a Codex
-usage-limit reset. The temporary network is left running outside the repo.
+Engine (`src/engine/`), local storage (`src/storage/`), and all 5 UI screens
+(`src/app/`, `src/features/{profiles,intake,screening,report,reference}/`)
+are implemented, unit-tested (15/15 passing), and manually verified in-browser
+against all 3 canonical SL-2026-00x scenarios from `docs/12`. See
+`docs/06_erd.md` §10 for the exact output contract Compliance Trail's
+`VERDICT_RECORD` expects from this engine.
 
-**Still needed to close P0:**
-1. Commit the `basicgo` definition.
-2. Submit and query a sample asset transaction.
-3. Record the proven versions/commands in `docs/14_developer_setup.md`.
-4. Re-check P0's stated exit criteria (`docs/13_implementation_plan.md` P0) once the above land.
+### Compliance Trail — P0, P1, P1.5 done; P2 (real chaincode) next
+
+**P0 (outside this repo — no HALCHECK source files changed):**
+- Fabric samples checkout pinned at `05edea0`, at `/private/tmp/fabric-samples-halcheck-p0`.
+- Local toolchain proven: Docker 29.6.2, Go go1.26.5, peer v2.5.15, Node v26.0.0 — see `docs/14_developer_setup.md` §1.1.
+- 2-org test network up (peers, Raft orderer, 3 CAs); `compliancetrail` channel created and joined.
+- `basicgo` sample chaincode installed, approved by both orgs, and **committed** (sequence 2).
+- Sample transaction proven both directions: `InitLedger` submitted, `GetAllAssets` queried successfully.
+- **Not yet closed:** `scripts/backup-volumes.sh` couldn't be exercised — Docker Hub was unreachable for the `alpine` pull (confirmed not a sandboxing artifact, still true as of P1). Retry once registry connectivity is available; this is P0's one remaining exit criterion.
+
+**P1 — Identity Setup, fully proven (`docs/14_developer_setup.md` §1.2):**
+- All 6 roles issued real Fabric CA identities (Org1 CA), each carrying a `role` custom attribute matching `06_erd.md`'s `IDENTITY.role` enum exactly (`ingredient_qa`, `production_qa`, `compliance_officer`, `export_officer`, `brand_owner`, `system_admin`).
+- Verified via a throwaway `identity-probe` chaincode (`WhoAmI`, using `cid.GetAttributeValue`) — kept outside this repo, distinct from the real `chaincode/batch`/`chaincode/refdata` modules P2 will define. All 6 identities returned their exact role read live from chaincode context.
+- Submit capability proven for 2 representative identities (`ingredient-qa`, `system-admin`) against `basicgo`.
+- P1 exit criteria met in full: "six distinct, verifiable identities exist and can be used to submit test transactions."
+
+**P1.5 — Chaincode Design Gate, closed (2026-08-22):**
+Re-verified all 5 TRD §23 pre-build authority items are still synchronized
+across `03_frd.md`, `04_trd.md`, `05_architecture.md`, `06_erd.md` — none
+drifted from this session's additive edits (which only appended new Core
+Screening App sections, never touched existing Compliance Trail content;
+`04_trd.md`/`05_architecture.md` untouched entirely, confirmed via `git log`).
+
+| # | Decision | Status |
+|---|---|---|
+| 1 | Reference-data enforcement via `refdata.ResolveActiveReference` | synchronized |
+| 2 | Signed verdict attestation, binding | synchronized — now also grounded in a real, working engine (see `06_erd.md` §10) |
+| 3 | Fail-closed audit delivery | synchronized |
+| 4 | Canonical Role × Field × Access matrix (TRD §23.4) | synchronized |
+| 5 | Uniform corrections (ingredient + production `supersedes_record_id`) | synchronized |
+
+**Next:** P2 (chaincode core rules) — writing the real `batch` and `refdata`
+Go modules per `04_trd.md` §3/§7. This is Critical tier per
+`docs/18_vibe_coding_guardrails.md` §2 — every function needs human
+line-by-line review before acceptance, not just a passing test, and every
+state-changing function needs its negative test in the same commit (P3).

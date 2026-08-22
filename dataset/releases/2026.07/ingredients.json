@@ -1,0 +1,24 @@
+[
+  { "entryId": "ing-aqua", "name": "Aqua", "defaultHalalRisk": false },
+  { "entryId": "ing-glycerin", "name": "Glycerin", "defaultHalalRisk": false },
+  { "entryId": "ing-niacinamide", "name": "Niacinamide", "defaultHalalRisk": false },
+  { "entryId": "ing-centella-asiatica-extract", "name": "Centella Asiatica Extract", "defaultHalalRisk": false },
+  { "entryId": "ing-panthenol", "name": "Panthenol", "defaultHalalRisk": false },
+  { "entryId": "ing-phenoxyethanol", "name": "Phenoxyethanol", "defaultHalalRisk": false },
+  {
+    "entryId": "ing-cetyl-alcohol",
+    "name": "Cetyl Alcohol",
+    "defaultHalalRisk": true,
+    "riskNote": "Fatty-alcohol source ambiguity — plant or animal derived depending on source."
+  },
+  {
+    "entryId": "ing-sodium-stearate-unverified-variant",
+    "name": "Sodium Stearate (unverified source variant)",
+    "defaultHalalRisk": true
+  },
+  {
+    "entryId": "ing-sodium-stearate-plant-verified",
+    "name": "Sodium Stearate (plant-verified)",
+    "defaultHalalRisk": false
+  }
+]

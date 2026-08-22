@@ -10,7 +10,61 @@
 
 ## 1. Status
 
-Design phase complete. Build phase not yet started. This guide covers environment setup only — no working code exists yet to run.
+Design phase complete. Build phase started — P0 (local network foundation) is proven end-to-end as of 2026-08-22. This guide's install steps have now actually been run and verified, not just planned.
+
+### 1.1 P0 — Proven Environment (2026-08-22)
+
+Exact versions confirmed working on the target machine:
+
+```text
+Docker:  29.6.2 (build dfc4efb)
+Go:      go1.26.5 darwin/arm64
+peer:    v2.5.15 (Commit 83c7930, built with go1.26.0), darwin/arm64
+Node.js: v26.0.0
+npm:     11.12.1
+```
+
+`fabric-samples` pinned at commit `05edea0` (checked out to a working directory outside the repo — see `.gitignore` discipline in `19_repository_structure.md`; never commit generated Fabric material).
+
+**Proven end-to-end:**
+- `test-network` brought up with the default 2-org topology (Org1, Org2), Raft orderer, CAs for org1/org2/orderer.
+- `compliancetrail` channel created; both peers joined.
+- Official `basicgo` sample chaincode installed on both peers, approved by both orgs, and **committed** to the channel (sequence 2 — see note below).
+- Sample transaction proven both ways: `InitLedger` submitted successfully (endorsed by both orgs, committed VALID), then `GetAllAssets` queried and returned the expected 6 seeded assets.
+
+**Note on sequence 2:** commit readiness initially reported the required sequence as 2, not 1, meaning an earlier approval attempt at sequence 1 had already been made (by a prior session) before this checkpoint. Re-approving at sequence 2 for both orgs and committing at sequence 2 resolved it cleanly — consistent with Fabric's formal lifecycle (approve, then commit; no ad hoc redeployment, per `18_vibe_coding_guardrails.md` §9.6).
+
+### 1.2 P1 — Proven Identity Setup (2026-08-22)
+
+All 6 roles issued real Fabric CA identities against `ca-org1`, each registered as a `client`-type identity carrying a custom `role` attribute (`:ecert` — embedded in the issued certificate, requested again explicitly at enroll time via `--enrollment.attrs "role"`), matching `06_erd.md`'s `IDENTITY.role` enum exactly:
+
+```text
+ingredient-qa        -> role=ingredient_qa
+production-qa        -> role=production_qa
+compliance-officer   -> role=compliance_officer
+export-officer       -> role=export_officer
+brand-owner          -> role=brand_owner
+system-admin         -> role=system_admin
+```
+
+Enrolled MSPs live at `organizations/peerOrganizations/org1.example.com/users/<id>@org1.example.com/msp` inside the `fabric-samples` checkout (never committed to this repo — same discipline as any other generated identity material).
+
+**Proven, not just issued:** a throwaway verification chaincode (`identity-probe`, a `WhoAmI` function calling `cid.GetMSPID`/`cid.GetAttributeValue` — kept outside this repo, distinct from the real `chaincode/batch`/`chaincode/refdata` modules P2 will define) was packaged, installed on both peers, approved by both orgs, and committed. Invoked once per identity, it returned each identity's exact `role` value read from live chaincode context — not just confirmed present in the certificate:
+
+```json
+{"mspId":"Org1MSP","hasRole":true,"role":"ingredient_qa", ...}
+{"mspId":"Org1MSP","hasRole":true,"role":"production_qa", ...}
+{"mspId":"Org1MSP","hasRole":true,"role":"compliance_officer", ...}
+{"mspId":"Org1MSP","hasRole":true,"role":"export_officer", ...}
+{"mspId":"Org1MSP","hasRole":true,"role":"brand_owner", ...}
+{"mspId":"Org1MSP","hasRole":true,"role":"system_admin", ...}
+```
+
+Submit capability (not just query) proven for two representative identities — `ingredient-qa` and `system-admin` each submitted a `CreateAsset` transaction against `basicgo`, endorsed by both orgs and committed, then read back successfully.
+
+**P1 exit criteria met:** "six distinct, verifiable identities exist and can be used to submit test transactions" (`13_implementation_plan.md` P1).
+
+**Not yet proven:** the volume backup script (`scripts/backup-volumes.sh`) could not be exercised — it depends on pulling the `alpine` base image, and Docker Hub was unreachable from this machine at the time (confirmed not a tool-sandboxing issue: failed identically with sandboxing disabled). The script's logic is unchanged from spec; this needs a retry once registry connectivity is available, before P0 is considered fully closed per its exit criteria in `13_implementation_plan.md`.
 
 ## 2. Requirements
 
