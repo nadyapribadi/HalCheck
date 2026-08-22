@@ -1,0 +1,10 @@
+name: halcheck
+
+x-default-logging: &default-logging
+  driver: "json-file"
+  options:
+    max-size: "10m"
+    max-file: "3"
+
+# Services are added during P0 once the Fabric sample network shape is confirmed.
+services: {}

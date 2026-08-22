@@ -6,7 +6,11 @@
 - Module: Compliance Trail
 - Repository: `halcheck`
 - Status: Design complete
-- Version: 0.1.0-planning
+- Version: 0.2.0-planning
+
+## Changelog
+
+- **v0.2.0:** Added Intended Market to demo batches and flagged-record/correction details for the failure path.
 
 ## 1. Purpose
 
@@ -66,21 +70,24 @@ Locks exact demo content so Build doesn't stall on inventing "realistic-looking"
 ## 5. Demo Batches
 
 ### Batch SL-2026-001 — Happy path
+- **Intended Market:** Malaysia.
 - **Ingredients (6):** Aqua, Glycerin, Niacinamide, Centella Asiatica Extract, Panthenol, Phenoxyethanol — Source: PT Sumber Alam Nusantara.
 - **Production:** date auto-populated, Line Segregation = Yes, Standard = CPKB.
 - **Verdict:** Pass, PP 42/2024, no recognition check triggered.
 - **Export:** Malaysia, succeeds.
 
 ### Batch SL-2026-002 — Failure + correction path
+- **Intended Market:** Malaysia.
 - **Ingredients (5):** as above minus one, plus Cetyl Alcohol (pre-flagged Halal Risk = Yes), Source: PT Distribusi Kosmetik Prima (unverified variant).
-- **Verdict:** Fail, reason: "Unverified ingredient source."
-- **Correction:** ingredient resubmitted with Source changed to PT Kimia Hijau Indonesia (verified) — new linked record, original stays visible.
+- **Verdict:** Fail, reason: "Unverified ingredient source," flagged record: the Cetyl Alcohol ingredient record.
+- **Correction:** only the flagged Cetyl Alcohol ingredient record is corrected with Source changed to PT Kimia Hijau Indonesia (verified) — new linked record, original stays visible as superseded; other ingredient records are untouched.
 - **Verdict (2nd):** Pass.
 - **Export:** now succeeds.
 
 *This batch concretely demonstrates why the Supplier Reference List has a deprecated entry — the unverified supplier variant used in the first attempt is the exact "PT Distribusi Kosmetik Prima (unverified variant)" reference-list row.*
 
 ### Batch SL-2026-003 — Recognition-edge case
+- **Intended Market:** Indonesia.
 - **Ingredients (6):** all clear.
 - **Production:** confirmed.
 - **Certificate scenario:** manufacturer holds a JAKIM certificate; batch evaluated against a BPJPH rule.

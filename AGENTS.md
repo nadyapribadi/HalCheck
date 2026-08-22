@@ -32,7 +32,7 @@ cd backend && npm run dev
 cd frontend && npm run dev
 
 # Full stack
-docker-compose up -d
+docker compose up -d
 ```
 
 ## Architecture (brief — see docs/05_architecture.md for full diagrams)

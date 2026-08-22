@@ -6,11 +6,15 @@
 - Module: Compliance Trail
 - Repository: `halcheck`
 - Status: Design complete
-- Version: 0.1.0-planning
+- Version: 0.2.0-planning
+
+## Changelog
+
+- **v0.2.0:** Added Section 2a (Batch Creation) with FRD-CHAIN-BATCH-001, resolving the destination/verdict sequencing gap. Added FRD-CHAIN-VERDICT-007 (Fail verdicts must reference the specific flagged record). Added FRD-CHAIN-LEDGER-005 (corrections supersede only the flagged record, not the whole ingredient set).
 
 ## 1. Scope
 
-Defines functional requirements for the Compliance Trail feature, covering identity, role/access control, sequencing, ledger immutability, controlled vocabulary, standards anchoring, verdict/recognition handling, read-only access, remote access, reference data management, the System Admin role, audit logging, field-level access control, AI trail explanation, and concurrency handling.
+Defines functional requirements for the Compliance Trail feature, covering batch creation, identity, role/access control, sequencing, ledger immutability, controlled vocabulary, standards anchoring, verdict/recognition handling, read-only access, remote access, reference data management, the System Admin role, audit logging, field-level access control, AI trail explanation, and concurrency handling.
 
 ## 2. Identity and Authentication
 
@@ -20,6 +24,14 @@ Defines functional requirements for the Compliance Trail feature, covering ident
 | FRD-CHAIN-IDENTITY-002 | Backend must verify JWT-authenticated identity matches the Fabric identity used for each chaincode call. | PRD-CT-001 | P0 |
 | FRD-CHAIN-IDENTITY-003 | Client-supplied role strings must never be trusted for authorization decisions. | PRD-CT-002 | P0 |
 | FRD-CHAIN-IDENTITY-004 | Identity mismatch must be rejected before reaching chaincode, not after. | PRD-CT-002 | P0 |
+
+## 2a. Batch Creation (NEW)
+
+| ID | Requirement | Traces to | Priority |
+|---|---|---|---|
+| FRD-CHAIN-BATCH-001 | A batch's intended market must be captured at creation time by Ingredient QA and is immutable thereafter. The compliance engine's recognition-directionality check must use this value, not a value entered later at export. | PRD-CT-009 | P0 |
+
+**Resolution note:** this closes a real sequencing gap — the recognition-directionality check depends on the destination market, but destination was previously only captured at Export, after the verdict was already recorded. Capturing it at batch creation instead means the engine always has the value it needs before computing the verdict.
 
 ## 3. Role and Access Control
 
@@ -49,6 +61,9 @@ Defines functional requirements for the Compliance Trail feature, covering ident
 | FRD-CHAIN-LEDGER-002 | Corrections must be submitted as new records, linked to the original. | PRD-CT-006 | P0 |
 | FRD-CHAIN-LEDGER-003 | Superseded records must remain queryable and visible, not hidden after correction. | PRD-CT-006, PRD-CT-010 | P0 |
 | FRD-CHAIN-LEDGER-004 | Fail verdicts must be recorded with identical permanence guarantees as Pass verdicts. | PRD-CT-005 | P0 |
+| FRD-CHAIN-LEDGER-005 | A correction submission must reference the single flagged record it supersedes. Only that record is marked superseded — all other records in the batch remain untouched and are not resubmitted. | PRD-CT-006 | P0 |
+
+**Resolution note:** this closes the correction-granularity gap — corrections previously implied resubmitting the whole ingredient set, contradicting the per-ingredient hashing already required by FRD-CHAIN-UPLOAD-002.
 
 ## 6. Ingredient Submission and Controlled Vocabulary
 
@@ -90,6 +105,7 @@ Defines functional requirements for the Compliance Trail feature, covering ident
 | FRD-CHAIN-VERDICT-004 | A Fail verdict's reason must be selected from the controlled Fail Reason catalog, not freely typed. | PRD-CT-015 | P1 |
 | FRD-CHAIN-VERDICT-005 | The compliance engine's Pass/Fail output is binding. The Compliance Officer role has no override capability — the verdict record submitted to the ledger must exactly match the engine's determination, with no discretionary field permitting a different outcome to be recorded. | PRD-CT-005 | P0 |
 | FRD-CHAIN-VERDICT-006 | Because the verdict is engine-determined and non-discretionary (per FRD-CHAIN-VERDICT-005), no second-party review/counter-signature is required on the verdict-recording action — the check in this step is the deterministic engine output itself, not a second human. | PRD-CT-005 | P1 |
+| FRD-CHAIN-VERDICT-007 | A Fail verdict must record the specific ingredient (or production) record ID that triggered the failure, not just a textual reason. | PRD-CT-005, PRD-CT-006 | P0 |
 
 ## 10. Read-Only Access
 

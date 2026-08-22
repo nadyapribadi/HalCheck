@@ -6,7 +6,11 @@
 - Module: Compliance Trail
 - Repository: `halcheck`
 - Status: Design complete
-- Version: 0.1.0-planning
+- Version: 0.2.0-planning
+
+## Changelog
+
+- **v0.2.0:** Added Intended Market to batch creation, flagged-record linkage on Fail verdicts, and single-record correction semantics.
 
 ## 1. Architecture Summary
 
@@ -163,7 +167,8 @@ Business events (ingredient submissions, verdicts) belong on the ledger because 
 ## 8. Batch Lifecycle Flow
 
 ```text
-ingredient submission (role: Ingredient QA)
+batch creation with intended market (role: Ingredient QA)
+  -> ingredient submission (role: Ingredient QA)
   -> production confirmation (role: Production QA, requires prior ingredient record)
   -> compliance verdict (role: Compliance Officer, wraps existing rule engine, BINDING per FRD-CHAIN-VERDICT-005)
        |
@@ -171,10 +176,11 @@ ingredient submission (role: Ingredient QA)
        |
        +-- Fail --> batch status: "Awaiting Correction"
                      routes back into Ingredient QA's filtered Batch List
-                     -> new ingredient submission -> re-enters flow at production confirmation
+                     -> correction supersedes flagged record only
+                     -> re-enters flow at production confirmation
 ```
 
-This is the concrete architectural expression of the Fail-correction routing fix — the batch's computed status (derived, not stored) explicitly includes an "Awaiting Correction" state that Ingredient QA's Batch List filter checks for.
+This is the concrete architectural expression of the Fail-correction routing fix — the batch's computed status (derived, not stored) explicitly includes an "Awaiting Correction" state that Ingredient QA's Batch List filter checks for. Corrections are no longer whole-ingredient-set resubmissions; the correction record points to the single flagged prior record.
 
 ## 9. Data Model
 
@@ -182,8 +188,8 @@ Full entity detail lives in `06_erd.md` — this section is a cross-referenced s
 
 | Record type | Written by | Immutable? | Linkage |
 |---|---|---|---|
-| Batch | System (derived from child records) | N/A — minimal entity | See ERD |
-| Ingredient / Production / Verdict / Export | Respective role | Yes, supersede-only | Denormalized snapshots |
+| Batch | Ingredient QA at creation | Yes | Immutable intended market |
+| Ingredient / Production / Verdict / Export | Respective role | Yes, supersede-only | Denormalized snapshots; Fail verdicts flag the triggering record |
 | Reference Entry | System Admin | Yes, supersede-only | Self-referencing |
 | Audit Log Entry | System (automatic) | Yes, DB-grant enforced | Enum `action` |
 
@@ -203,7 +209,9 @@ minio/
 
 ```text
 # Ledger-originated (via chaincode)
+batch.created
 ingredient.submitted
+ingredient.corrected
 production.confirmed
 verdict.recorded
 export.requested

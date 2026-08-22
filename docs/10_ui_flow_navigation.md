@@ -6,7 +6,11 @@
 - Module: Compliance Trail
 - Repository: `halcheck`
 - Status: Design complete
-- Version: 0.1.0-planning
+- Version: 0.2.0-planning
+
+## Changelog
+
+- **v0.2.0:** Batch creation now captures Intended Market before ingredient upload. Tamper-Evidence Sandbox route language updated to Integrity Sandbox.
 
 ## 1. Purpose
 
@@ -39,9 +43,9 @@ flowchart TD
   BatchDetail --> IngredientUpload[Ingredient Upload Panel]
   BatchDetail --> ProductionForm[Production Confirmation Form]
   BatchDetail --> ExportForm[Export Request Form]
-  BatchDetail --> Sandbox[Tamper-Evidence Sandbox]
+  BatchDetail --> Sandbox[Integrity Sandbox]
   BatchDetail --> AIPanel[AI Explanation Panel - inline]
-  BatchList --> NewBatch[Start New Batch - Ingredient QA only]
+  BatchList --> NewBatch[Start New Batch - Ingredient QA only, choose Intended Market]
   NewBatch --> IngredientUpload
   BatchDetail -.Fail verdict recorded.-> StatusChange[Batch status -> Awaiting Correction]
   StatusChange -.appears in.-> BatchList
@@ -73,7 +77,7 @@ Both shells share only the Login screen — after authentication, a System Admin
 | `/batches/:id/production` | Production QA only | Same pattern |
 | `/batches/:id/verdict` | Compliance Officer only | Same pattern |
 | `/batches/:id/export` | Export/Logistics Officer only | Same pattern |
-| `/batches/:id/sandbox` | All 5 operational roles | — |
+| `/batches/:id/integrity-sandbox` | All 5 operational roles | — |
 | `/batches/:id/explain` | All 5 operational roles (inline on Batch Detail) | — |
 | `/admin` | System Admin only | → `/batches` if any operational role attempts it |
 | `/admin/reference-data/:type` | System Admin only | Same pattern |
@@ -88,7 +92,7 @@ Both shells share only the Login screen — after authentication, a System Admin
 
 ## 8. Batch Creation Flow
 
-Starting a new batch (Ingredient QA only) generates a system-assigned batch ID and moves directly into the Ingredient Upload Panel scoped to that ID — no separate "create batch" form exists. A correction submission (from an "Awaiting Correction" batch) uses the same Ingredient Upload Panel, not a separate screen — it's simply a new ingredient submission against an existing batch ID rather than a new one.
+Starting a new batch (Ingredient QA only) captures Intended Market first, then generates a system-assigned batch ID and moves directly into the Ingredient Upload Panel scoped to that ID. A correction submission from an "Awaiting Correction" batch uses the Ingredient Upload Panel in correction mode, pre-scoped to the single flagged record identified by the Fail verdict.
 
 ## 9. First-Use / Onboarding Path
 

@@ -162,4 +162,4 @@ MINIO_ROOT_PASSWORD
 
 ## 10. Config Validation Rule
 
-Before any `docker-compose up` that will be followed by a tunnel activation, confirm every credential-bearing variable above has been changed from its template/default value — this is the same check as the Pre-Demo Checklist in Developer Setup, restated here as a configuration-level rule.
+Before any `docker compose up` that will be followed by a tunnel activation, confirm every credential-bearing variable above has been changed from its template/default value — this is the same check as the Pre-Demo Checklist in Developer Setup, restated here as a configuration-level rule.

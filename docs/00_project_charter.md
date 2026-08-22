@@ -96,7 +96,7 @@ This project underwent one significant reset, formally documented as ADR-CT-000.
 ### Build Success (Milestone 1 — Implementation Plan P6)
 - Local Fabric network runs with two independently-deployable chaincode modules (batch, refdata).
 - All 5 operational roles functional end-to-end through the real UI.
-- Happy path, failure/correction path, recognition-edge case, and tamper-evidence demonstration all completable and recordable.
+- Happy path, failure/correction path, recognition-edge case, and Integrity Sandbox demonstration all completable and recordable.
 
 ### Full-Scope Success (Milestone 2 — Implementation Plan P11)
 - System Admin governance shell, centralized audit log, field-level RBAC, and AI trail explanation all functional.

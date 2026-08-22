@@ -6,7 +6,11 @@
 - Module: Compliance Trail
 - Repository: `halcheck`
 - Status: Design complete
-- Version: 0.1.0-planning
+- Version: 0.2.0-planning
+
+## Changelog
+
+- **v0.2.0:** Added batch-level `intended_market`, fail `flagged_record_id`, and single-record correction linkage to match FRD/ERD updates. Export no longer accepts destination as a user-entered value.
 
 ## 1. Technical Strategy
 
@@ -78,10 +82,11 @@ erDiagram
     BATCH {
         string batch_id PK
         datetime created_at
+        string intended_market
     }
 ```
 
-`Batch` is a minimal entity — `batch_id` and `created_at` only. Status is never stored on the ledger; it is computed by the backend from the latest child record present for that batch, cached in PostgreSQL.
+`Batch` remains deliberately small, but now includes immutable `intended_market`, captured at creation so recognition-directionality can be evaluated before verdict recording. Status is never stored on the ledger; it is computed by the backend from the latest child record present for that batch, cached in PostgreSQL.
 
 ## 5. Reference Data Linkage — Resolved
 
@@ -114,6 +119,8 @@ A batch record is a self-contained fact the moment it's written — matching the
 
 - REST API using Express, functioning strictly as a translation layer between the frontend and the Fabric Gateway SDK.
 - JWT-based authentication; the authenticated identity must match the Fabric identity used for each chaincode call.
+- Batch creation captures immutable `intended_market`; export records copy that value as a historical snapshot and never accept a user-entered destination market.
+- Fail verdicts include `flagged_record_id`; correction submissions include `supersedes_record_id` and may supersede only the flagged record, not the full ingredient set.
 - File uploads (ingredient sheets, evidence documents) handled via Multer, routed to off-chain storage — never written directly to ledger state.
 - CORS restricted to the deployed frontend origin only.
 - Basic rate limiting required once the application is reachable via a public tunnel.
@@ -128,7 +135,7 @@ A batch record is a self-contained fact the moment it's written — matching the
 
 | Store | Contents | Authoritative? |
 |---|---|---|
-| Fabric ledger | Batch records (snapshot-based), reference-data entries | Yes |
+| Fabric ledger | Batch records including intended market, snapshot-based lifecycle records, reference-data entries | Yes |
 | CouchDB | Queryable mirror of ledger state | No |
 | PostgreSQL | User accounts, computed batch status cache, System Audit Log | No (except Audit Log — see below) |
 | File storage (MinIO) | Uploaded files, keyed per Section 11 | No |

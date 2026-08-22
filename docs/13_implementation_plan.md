@@ -158,7 +158,7 @@ Sprint 10:    P9, P10, P11    (access, hardening, documentation closure)
 
 ## 5. MVP Scope
 
-**True MVP = P0 through P6.** The five operational roles, real chaincode enforcement, the core batch lifecycle, and the five signature walkthrough moments (happy path, Fail+correction, tamper sandbox, recognition edge case) are all achievable without System Admin, Audit Log, or AI Explanation. P7 and P8 are genuinely deferrable to a second milestone without weakening the core "proof over assertion" narrative.
+**True MVP = P0 through P6.** The five operational roles, real chaincode enforcement, the core batch lifecycle, and the five signature walkthrough moments (happy path, Fail+correction, Integrity Sandbox, recognition edge case) are all achievable without System Admin, Audit Log, or AI Explanation. P7 and P8 are genuinely deferrable to a second milestone without weakening the core "proof over assertion" narrative.
 
 ## 6. Implementation Rules
 

@@ -6,7 +6,11 @@
 - Module: Compliance Trail
 - Repository: `halcheck`
 - Status: Design complete
-- Version: 0.1.0-planning
+- Version: 0.2.0-planning
+
+## Changelog
+
+- **v0.2.0:** Closed the recognition-edge sequencing open question by capturing Intended Market at batch creation and tracing it through FRD-CHAIN-BATCH-001.
 
 ## 1. Purpose / Vision
 
@@ -126,5 +130,6 @@ Contract manufacturing has documented failure points that plain record-keeping d
 ## 13. Open Questions
 
 - Should PRD-CT-011 (shareable link) need its own acceptance test, or is it validated informally at demo time?
-- Should the recognition-edge-case journey get a dedicated FRD requirement ID, or stay folded under the compliance verdict requirement?
 - LLM provider selection: criterion is stated in TRD (instruction-following/refusal reliability over raw capability); specific provider left to Build-time selection.
+
+**Resolved in v0.2.0:** the recognition-edge-case journey now has a concrete supporting FRD requirement via FRD-CHAIN-BATCH-001, because Intended Market must exist before verdict computation.

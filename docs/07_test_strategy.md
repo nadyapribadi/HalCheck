@@ -6,7 +6,11 @@
 - Module: Compliance Trail
 - Repository: `halcheck`
 - Status: Design complete
-- Version: 0.1.0-planning
+- Version: 0.2.0-planning
+
+## Changelog
+
+- **v0.2.0:** Added tests for immutable Intended Market, flagged-record Fail verdicts, single-record correction, and Integrity Sandbox controlled-vocabulary bypass demonstration.
 
 ## 1. Testing Philosophy
 
@@ -45,6 +49,7 @@ A test that only confirms the allowed path works proves nothing about whether th
 ### End-to-End Tests
 - Full batch lifecycle: sourcing to production to compliance to export, across all 5 operational roles
 - Full failure lifecycle: Fail recorded, export blocked, correction submitted, original Fail still visible
+- Intended Market lifecycle: captured at batch creation, used by verdict recognition check, displayed read-only at export, and never editable later
 - Tunnel-exposed access path, confirmed reachable only via intended ports
 - Reference-data change: subsequent batch reflects new version, prior batch retains old version
 - System Admin audit review: confirms expected entries present
@@ -59,7 +64,10 @@ A test that only confirms the allowed path works proves nothing about whether th
 | Sequencing | Production attempted before ingredient record exists; compliance attempted before production record exists; export attempted before verdict exists — all rejected |
 | Immutability | Attempt to edit an existing ledger record directly; attempt to delete a record; both rejected |
 | Fail handling | Fail verdict recorded and queryable; export remains blocked after Fail; correction creates new record without removing original |
+| Flagged-record linkage | Fail verdict records the specific `flagged_record_id`; the UI and trail retrieval expose the flagged record where authorized |
+| Correction granularity | Correction submission includes `supersedes_record_id`; only that flagged ingredient record becomes superseded, while all other ingredient records remain current |
 | Recognition edge case | Cross-jurisdiction certificate scenario produces correct, visibly labeled verdict detail |
+| Intended market immutability | Attempt to alter intended market after batch creation; rejected at chaincode/API level |
 | Identity spoofing | Backend request with mismatched JWT-vs-Fabric-identity is rejected before reaching chaincode |
 | System Admin boundary | System Admin attempts every batch-submission action; all rejected at chaincode level |
 | Reference data immutability | Attempt direct update/delete of a reference-data entry; rejected — no such chaincode function exists |
@@ -68,6 +76,7 @@ A test that only confirms the allowed path works proves nothing about whether th
 | Audit log access boundary | Each of the 5 operational roles attempts to access audit log routes; all rejected |
 | Field-level access | For each role, inspect actual API response payload for a record containing fields that role shouldn't see; confirm absence, not just visual hiding |
 | Controlled vocabulary bypass | Construct a direct API request bypassing the frontend select component; confirm rejection with `reason: "not_a_recognized_value"` at the backend, for both manual and bulk-upload paths |
+| Integrity Sandbox controlled vocabulary mode | Sandbox attempt to submit an unlisted ingredient/supplier returns `not_a_recognized_value` without writing real data |
 | Concurrency conflict handling | Submit two genuinely simultaneous requests against the same batch; confirm exactly one succeeds, the other receives `concurrent_modification`, and ledger state reflects only the successful one |
 | Fail-correction routing | After a Fail verdict, confirm the batch's computed status becomes "Awaiting Correction" and appears in Ingredient QA's filtered Batch List |
 | Idempotent resubmission | Submit a request, simulate a network drop before the response returns, retry with the same idempotency key; confirm no duplicate ledger record is created |

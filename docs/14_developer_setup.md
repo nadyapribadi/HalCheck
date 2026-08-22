@@ -128,7 +128,7 @@ npm run dev
 ## 10. Full Local Stack
 
 ```bash
-docker-compose up -d
+docker compose up -d
 ```
 
 `docker-compose.yml` includes explicit health checks and `depends_on: condition: service_healthy` for the backend relative to the Fabric network and PostgreSQL.
@@ -191,7 +191,7 @@ Run this before every walkthrough recording session, not just periodically.
 ```bash
 #!/bin/bash
 # health-check.sh — run immediately before any demo or recording
-docker-compose ps
+docker compose ps
 echo "---"
 curl -sf http://localhost:3000/health || echo "BACKEND UNHEALTHY"
 curl -sf http://localhost:5984/_up || echo "COUCHDB UNHEALTHY"
