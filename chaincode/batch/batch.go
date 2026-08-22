@@ -170,21 +170,28 @@ func (c *BatchContract) nextBatchID(ctx contractapi.TransactionContextInterface,
 // (supersedes_record_id actually set, per FRD-CHAIN-LEDGER-005/TRD §23.5's
 // distinct role/state rules) is deliberately a separate follow-up function,
 // not conflated into this one.
+// Note on the metadata struct tags below: contractapi generates its own
+// JSON schema from these tags for response validation, and it is NOT
+// driven by the json tag's `omitempty` -- a field is schema-required
+// unless it carries its own `metadata:"...,optional"` tag. This exact gap
+// broke refdata.ReferenceEntry on its first real network invocation (unit
+// tests bypass contractapi's schema-validation layer entirely, calling
+// these functions directly) -- fixed proactively here for the same reason.
 type IngredientRecord struct {
-	RecordID                   string `json:"record_id"`
-	BatchID                    string `json:"batch_id"`
-	UploadSessionID            string `json:"upload_session_id,omitempty"`
-	IngredientNameSnapshot     string `json:"ingredient_name_snapshot"`
-	IngredientReferenceEntryID string `json:"ingredient_reference_entry_id"`
-	IngredientReferenceVersion string `json:"ingredient_reference_version"`
-	SourceSnapshot             string `json:"source_snapshot"`
-	SupplierReferenceEntryID   string `json:"supplier_reference_entry_id"`
-	SupplierReferenceVersion   string `json:"supplier_reference_version"`
-	HalalRiskFlag              bool   `json:"halal_risk_flag"`
-	OverrideReason             string `json:"override_reason,omitempty"`
-	SupersedesRecordID         string `json:"supersedes_record_id,omitempty"`
-	Timestamp                  string `json:"timestamp"`
-	SubmittedBy                string `json:"submitted_by"`
+	RecordID                   string `json:"record_id" metadata:"record_id"`
+	BatchID                    string `json:"batch_id" metadata:"batch_id"`
+	UploadSessionID            string `json:"upload_session_id,omitempty" metadata:"upload_session_id,optional"`
+	IngredientNameSnapshot     string `json:"ingredient_name_snapshot" metadata:"ingredient_name_snapshot"`
+	IngredientReferenceEntryID string `json:"ingredient_reference_entry_id" metadata:"ingredient_reference_entry_id"`
+	IngredientReferenceVersion string `json:"ingredient_reference_version" metadata:"ingredient_reference_version"`
+	SourceSnapshot             string `json:"source_snapshot" metadata:"source_snapshot"`
+	SupplierReferenceEntryID   string `json:"supplier_reference_entry_id" metadata:"supplier_reference_entry_id"`
+	SupplierReferenceVersion   string `json:"supplier_reference_version" metadata:"supplier_reference_version"`
+	HalalRiskFlag              bool   `json:"halal_risk_flag" metadata:"halal_risk_flag"`
+	OverrideReason             string `json:"override_reason,omitempty" metadata:"override_reason,optional"`
+	SupersedesRecordID         string `json:"supersedes_record_id,omitempty" metadata:"supersedes_record_id,optional"`
+	Timestamp                  string `json:"timestamp" metadata:"timestamp"`
+	SubmittedBy                string `json:"submitted_by" metadata:"submitted_by"`
 }
 
 // resolvedReference is batch's own mirror of refdata.ReferenceEntry's JSON
@@ -333,6 +340,142 @@ func (c *BatchContract) SubmitIngredient(
 	key, err := ingredientRecordKey(ctx, batchID, record.RecordID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to build ingredient record key: %w", err)
+	}
+
+	if err := ctx.GetStub().PutState(key, recordJSON); err != nil {
+		return nil, fmt.Errorf("failed to write to world state: %w", err)
+	}
+
+	return &record, nil
+}
+
+// ProductionRecord mirrors docs/06_erd.md's PRODUCTION_RECORD. This first
+// version covers plain confirmation only -- correction mode
+// (supersedes_record_id actually set, per TRD §23.5) is deliberately a
+// separate follow-up function, matching how correction mode was scoped out
+// of SubmitIngredient above.
+type ProductionRecord struct {
+	RecordID                  string `json:"record_id" metadata:"record_id"`
+	BatchID                   string `json:"batch_id" metadata:"batch_id"`
+	BatchDate                 string `json:"batch_date" metadata:"batch_date"`
+	LineSegregationConfirmed  bool   `json:"line_segregation_confirmed" metadata:"line_segregation_confirmed"`
+	StandardSnapshot          string `json:"standard_snapshot" metadata:"standard_snapshot"`
+	StandardReferenceEntryID  string `json:"standard_reference_entry_id" metadata:"standard_reference_entry_id"`
+	StandardReferenceVersion  string `json:"standard_reference_version" metadata:"standard_reference_version"`
+	SupersedesRecordID        string `json:"supersedes_record_id,omitempty" metadata:"supersedes_record_id,optional"`
+	Timestamp                 string `json:"timestamp" metadata:"timestamp"`
+	SubmittedBy               string `json:"submitted_by" metadata:"submitted_by"`
+}
+
+// productionStandardValue is the one manufacturing standard production
+// records reference -- fixed and auto-filled, not chosen by the caller
+// (Screen Requirements §7: "Standard: display-only, auto-filled (CPKB)").
+const productionStandardValue = "CPKB"
+
+func productionRecordKey(ctx contractapi.TransactionContextInterface, batchID string, recordID string) (string, error) {
+	return ctx.GetStub().CreateCompositeKey("productionRecord", []string{batchID, recordID})
+}
+
+// hasAnyRecord checks whether at least one record of the given type exists
+// for a batch -- used both for FRD-CHAIN-SEQUENCE-001 (does an ingredient
+// record exist yet) and for rejecting a second plain production
+// confirmation (does one already exist).
+func (c *BatchContract) hasAnyRecord(ctx contractapi.TransactionContextInterface, objectType string, batchID string) (bool, error) {
+	iterator, err := ctx.GetStub().GetStateByPartialCompositeKey(objectType, []string{batchID})
+	if err != nil {
+		return false, fmt.Errorf("failed to query %s records: %w", objectType, err)
+	}
+	defer iterator.Close()
+	return iterator.HasNext(), nil
+}
+
+// ConfirmProduction records production confirmation for a batch
+// (FRD-CHAIN-PROD-001/002). Production QA only (FRD-CHAIN-ROLE-002).
+// Requires a prior ingredient record for the same batch
+// (FRD-CHAIN-SEQUENCE-001) and rejects a second plain confirmation once one
+// already exists -- a further confirmation is only ever valid as an
+// explicit correction (a separate, deliberately deferred follow-up
+// function, matching how correction mode is scoped out of SubmitIngredient
+// above).
+//
+// BatchDate is never accepted as a parameter -- it is always the
+// transaction timestamp (FRD-CHAIN-PROD-002: "system-populated ... not
+// manually editable by any role"). The governing standard (CPKB) is
+// resolved through refdata in this same transaction, exactly like
+// SubmitIngredient resolves ingredient/supplier (FRD-CHAIN-STANDARDS-004).
+func (c *BatchContract) ConfirmProduction(
+	ctx contractapi.TransactionContextInterface,
+	batchID string,
+	lineSegregationConfirmed bool,
+) (*ProductionRecord, error) {
+	if err := requireRole(ctx, "production_qa"); err != nil {
+		return nil, err
+	}
+
+	bKey, err := batchKey(ctx, batchID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to build batch key: %w", err)
+	}
+	batchBytes, err := ctx.GetStub().GetState(bKey)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read world state: %w", err)
+	}
+	if batchBytes == nil {
+		return nil, fmt.Errorf("batch_not_found: batch %q does not exist", batchID)
+	}
+
+	hasIngredient, err := c.hasAnyRecord(ctx, "ingredientRecord", batchID)
+	if err != nil {
+		return nil, err
+	}
+	if !hasIngredient {
+		return nil, fmt.Errorf("sequencing_violation: batch %q has no ingredient record yet", batchID)
+	}
+
+	hasProduction, err := c.hasAnyRecord(ctx, "productionRecord", batchID)
+	if err != nil {
+		return nil, err
+	}
+	if hasProduction {
+		return nil, fmt.Errorf("duplicate_entry: batch %q already has a production record; submit a correction instead", batchID)
+	}
+
+	standardRef, err := c.resolveReference(ctx, "standard", productionStandardValue)
+	if err != nil {
+		return nil, err
+	}
+
+	submittedBy, err := cid.GetID(ctx.GetStub())
+	if err != nil {
+		return nil, fmt.Errorf("failed to resolve caller identity: %w", err)
+	}
+
+	txTimestamp, err := ctx.GetStub().GetTxTimestamp()
+	if err != nil {
+		return nil, fmt.Errorf("failed to read transaction timestamp: %w", err)
+	}
+	ts := time.Unix(txTimestamp.GetSeconds(), int64(txTimestamp.GetNanos())).UTC().Format(time.RFC3339)
+
+	record := ProductionRecord{
+		RecordID:                 ctx.GetStub().GetTxID(),
+		BatchID:                  batchID,
+		BatchDate:                ts,
+		LineSegregationConfirmed: lineSegregationConfirmed,
+		StandardSnapshot:         standardRef.Value,
+		StandardReferenceEntryID: standardRef.EntryID,
+		StandardReferenceVersion: standardRef.Version,
+		Timestamp:                ts,
+		SubmittedBy:              submittedBy,
+	}
+
+	recordJSON, err := json.Marshal(record)
+	if err != nil {
+		return nil, fmt.Errorf("failed to marshal production record: %w", err)
+	}
+
+	key, err := productionRecordKey(ctx, batchID, record.RecordID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to build production record key: %w", err)
 	}
 
 	if err := ctx.GetStub().PutState(key, recordJSON); err != nil {

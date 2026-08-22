@@ -301,3 +301,135 @@ func TestSubmitIngredient_MultipleIngredientsOnSameBatch(t *testing.T) {
 		t.Fatalf("expected distinct ingredient snapshots, both were %q", first.IngredientNameSnapshot)
 	}
 }
+
+// batchWithIngredient sets up a batch that has already cleared
+// FRD-CHAIN-SEQUENCE-001's prerequisite (a prior ingredient record) --
+// shared setup for every ConfirmProduction test below.
+func batchWithIngredient(t *testing.T) (*mockTransactionContext, *Batch) {
+	t.Helper()
+	ctx := newIdentityContext(t, "Org1MSP", "ingredient_qa")
+	contract := &BatchContract{}
+	batch, err := contract.CreateBatch(ctx, "Malaysia")
+	if err != nil {
+		t.Fatalf("expected CreateBatch to succeed, got: %v", err)
+	}
+	stubResolveActiveReference(ctx.stub, "ingredient", "Aqua", "e1", "1", "")
+	stubResolveActiveReference(ctx.stub, "supplier", "PT Sumber Alam Nusantara", "e2", "1", "")
+	if _, err := contract.SubmitIngredient(ctx, batch.BatchID, "Aqua", "PT Sumber Alam Nusantara", false, false, ""); err != nil {
+		t.Fatalf("expected SubmitIngredient to succeed, got: %v", err)
+	}
+	return ctx, batch
+}
+
+func TestConfirmProduction_ProductionQASucceeds(t *testing.T) {
+	ctx, batch := batchWithIngredient(t)
+	stubResolveActiveReference(ctx.stub, "standard", "CPKB", "e3", "1", "")
+
+	prodCtx := ctx.actingAs(t, "Org1MSP", "production_qa")
+	contract := &BatchContract{}
+
+	record, err := contract.ConfirmProduction(prodCtx, batch.BatchID, true)
+	if err != nil {
+		t.Fatalf("expected ConfirmProduction to succeed for Production QA, got: %v", err)
+	}
+	if record.BatchID != batch.BatchID {
+		t.Fatalf("expected BatchID %q, got %q", batch.BatchID, record.BatchID)
+	}
+	if !record.LineSegregationConfirmed {
+		t.Fatal("expected LineSegregationConfirmed to be true")
+	}
+	if record.StandardSnapshot != "CPKB" || record.StandardReferenceEntryID != "e3" || record.StandardReferenceVersion != "1" {
+		t.Fatalf("expected the standard snapshot to match the resolved reference, got: %+v", record)
+	}
+	if record.BatchDate == "" || record.Timestamp == "" || record.SubmittedBy == "" || record.RecordID == "" {
+		t.Fatalf("expected BatchDate/Timestamp/SubmittedBy/RecordID to be populated, got: %+v", record)
+	}
+}
+
+// FRD-CHAIN-ROLE-002: Production QA may submit production records only.
+func TestConfirmProduction_OtherRolesRejected(t *testing.T) {
+	ctx, batch := batchWithIngredient(t)
+	stubResolveActiveReference(ctx.stub, "standard", "CPKB", "e3", "1", "")
+
+	roles := []string{"ingredient_qa", "compliance_officer", "export_officer", "brand_owner", "system_admin"}
+	for _, role := range roles {
+		t.Run(role, func(t *testing.T) {
+			roleCtx := ctx.actingAs(t, "Org1MSP", role)
+			contract := &BatchContract{}
+
+			_, err := contract.ConfirmProduction(roleCtx, batch.BatchID, true)
+			if err == nil {
+				t.Fatalf("expected ConfirmProduction to reject role %q, but it succeeded", role)
+			}
+			if !strings.Contains(err.Error(), "role_scope_violation") {
+				t.Fatalf("expected a role_scope_violation rejection, got: %v", err)
+			}
+		})
+	}
+}
+
+func TestConfirmProduction_NonexistentBatchRejected(t *testing.T) {
+	ctx := newIdentityContext(t, "Org1MSP", "production_qa")
+	contract := &BatchContract{}
+
+	_, err := contract.ConfirmProduction(ctx, "SL-2026-999", true)
+	if err == nil {
+		t.Fatal("expected ConfirmProduction to reject a batch ID that was never created")
+	}
+	if !strings.Contains(err.Error(), "batch_not_found") {
+		t.Fatalf("expected a batch_not_found rejection, got: %v", err)
+	}
+}
+
+// FRD-CHAIN-SEQUENCE-001: production requires a prior ingredient record.
+func TestConfirmProduction_NoIngredientYetRejected(t *testing.T) {
+	ctx := newIdentityContext(t, "Org1MSP", "ingredient_qa")
+	contract := &BatchContract{}
+	batch, err := contract.CreateBatch(ctx, "Malaysia")
+	if err != nil {
+		t.Fatalf("expected CreateBatch to succeed, got: %v", err)
+	}
+
+	prodCtx := ctx.actingAs(t, "Org1MSP", "production_qa")
+	_, err = contract.ConfirmProduction(prodCtx, batch.BatchID, true)
+	if err == nil {
+		t.Fatal("expected ConfirmProduction to reject a batch with no ingredient record yet")
+	}
+	if !strings.Contains(err.Error(), "sequencing_violation") {
+		t.Fatalf("expected a sequencing_violation rejection, got: %v", err)
+	}
+}
+
+func TestConfirmProduction_SecondConfirmationRejected(t *testing.T) {
+	ctx, batch := batchWithIngredient(t)
+	stubResolveActiveReference(ctx.stub, "standard", "CPKB", "e3", "1", "")
+	prodCtx := ctx.actingAs(t, "Org1MSP", "production_qa")
+	contract := &BatchContract{}
+
+	if _, err := contract.ConfirmProduction(prodCtx, batch.BatchID, true); err != nil {
+		t.Fatalf("expected the first ConfirmProduction call to succeed, got: %v", err)
+	}
+
+	_, err := contract.ConfirmProduction(prodCtx, batch.BatchID, true)
+	if err == nil {
+		t.Fatal("expected a second plain production confirmation to be rejected")
+	}
+	if !strings.Contains(err.Error(), "duplicate_entry") {
+		t.Fatalf("expected a duplicate_entry rejection, got: %v", err)
+	}
+}
+
+func TestConfirmProduction_LineSegregationFalseRecorded(t *testing.T) {
+	ctx, batch := batchWithIngredient(t)
+	stubResolveActiveReference(ctx.stub, "standard", "CPKB", "e3", "1", "")
+	prodCtx := ctx.actingAs(t, "Org1MSP", "production_qa")
+	contract := &BatchContract{}
+
+	record, err := contract.ConfirmProduction(prodCtx, batch.BatchID, false)
+	if err != nil {
+		t.Fatalf("expected ConfirmProduction to succeed even when line segregation is not confirmed, got: %v", err)
+	}
+	if record.LineSegregationConfirmed {
+		t.Fatal("expected LineSegregationConfirmed to be recorded as false, not silently flipped")
+	}
+}

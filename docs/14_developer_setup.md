@@ -64,7 +64,27 @@ Submit capability (not just query) proven for two representative identities — 
 
 **P1 exit criteria met:** "six distinct, verifiable identities exist and can be used to submit test transactions" (`13_implementation_plan.md` P1).
 
-**Not yet proven:** the volume backup script (`scripts/backup-volumes.sh`) could not be exercised — it depends on pulling the `alpine` base image, and Docker Hub was unreachable from this machine at the time (confirmed not a tool-sandboxing issue: failed identically with sandboxing disabled). The script's logic is unchanged from spec; this needs a retry once registry connectivity is available, before P0 is considered fully closed per its exit criteria in `13_implementation_plan.md`.
+**Update:** Docker Hub connectivity, unreachable during P0, came back during P2 (confirmed by a successful `alpine` pull). `scripts/backup-volumes.sh` itself still hasn't been run — retry before P0 is considered fully closed.
+
+### 1.3 P2 — Chaincode Core Rules, first slice proven live (2026-08-22)
+
+`refdata` (`AddReferenceEntry`, `DeprecateReferenceEntry`, `ResolveActiveReference`, `GetReferenceEntryHistory`, `ListReferenceEntries`) and `batch` (`CreateBatch`, `SubmitIngredient`) are unit-tested (39 tests total, both modules) and deployed live to the `compliancetrail` channel as independently upgradable chaincode (`ADR-CT-023`).
+
+**Real cross-chaincode invocation proven, not mocked:** `batch.SubmitIngredient` calls `refdata.ResolveActiveReference` via genuine `stub.InvokeChaincode` (TRD §23.1) — proven on the live network as `ingredient-qa`, not just via the isolated-by-design unit test mock (`docs/07_test_strategy.md` §2 deliberately keeps unit tests isolated from the network; this is the network-level counterpart):
+
+```text
+CreateBatch("Malaysia")                          -> SL-2026-001
+SubmitIngredient(SL-2026-001, "Aqua", "PT Sumber Alam Nusantara", ...)
+  -> ingredient_reference_entry_id and supplier_reference_entry_id
+     exactly match refdata's real composite keys and versions
+  -> halal_risk_flag correctly auto-populated from refdata's metadata
+```
+
+Both rejection paths also proven live: an unrecognized ingredient value is rejected with refdata's own `not_a_recognized_value` message, propagated unchanged across the cross-chaincode call; a non-`ingredient_qa` caller (`compliance_officer`) is rejected with `role_scope_violation`.
+
+**A real bug this deployment step caught, that unit tests structurally could not:** contractapi generates its own JSON schema for every transaction's return type and validates the actual response against it. Schema-required vs. optional is driven entirely by a dedicated `metadata:"...,optional"` struct tag — the `json:",omitempty"` tag has no effect on it. `ReferenceEntry`'s `superseded_by`/`deprecated_by`/`deprecated_at` (correctly empty and omitted from the JSON for a freshly-added entry) failed contractapi's schema validation on the very first live invoke, because those fields were schema-required by default. Unit tests never exercised this: they call the Go functions directly, bypassing `contractapi.ContractChaincode.Invoke()`'s dispatch and schema-validation layer entirely. Fixed by adding the missing `metadata` tags to every optional field in both `ReferenceEntry`, `ReferenceEntryHistoryItem`, and `IngredientRecord`; redeployed as v1.1 (sequence 2) on both chaincodes. This is the concrete argument for why `docs/07_test_strategy.md`'s "Chaincode Conformance Tests ... tested against the full local network (not mocked)" layer exists as its own category, not a redundant repeat of unit tests.
+
+A second infrastructure lesson from the same session: a multi-hour-old Docker daemon hiccup left both peers' internal chaincode-container tracking stale (a `basicgo` container had silently exited; new chaincode builds for `refdata`/`batch` never even started). Symptom was `"No such image"` on every invoke with no new build attempt logged. Fix was a plain `docker restart` of both peer containers — safe, no ledger data lost (peers reload existing ledger state from disk) — after which builds proceeded normally.
 
 ## 2. Requirements
 

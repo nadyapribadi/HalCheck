@@ -89,7 +89,7 @@ against all 3 canonical SL-2026-00x scenarios from `docs/12`. See
 `docs/06_erd.md` §10 for the exact output contract Compliance Trail's
 `VERDICT_RECORD` expects from this engine.
 
-### Compliance Trail — P0, P1, P1.5 done; P2 (real chaincode) next
+### Compliance Trail — P0/P1/P1.5 done; P2 in progress, first slice live
 
 **P0 (outside this repo — no HALCHECK source files changed):**
 - Fabric samples checkout pinned at `05edea0`, at `/private/tmp/fabric-samples-halcheck-p0`.
@@ -120,8 +120,31 @@ Screening App sections, never touched existing Compliance Trail content;
 | 4 | Canonical Role × Field × Access matrix (TRD §23.4) | synchronized |
 | 5 | Uniform corrections (ingredient + production `supersedes_record_id`) | synchronized |
 
-**Next:** P2 (chaincode core rules) — writing the real `batch` and `refdata`
-Go modules per `04_trd.md` §3/§7. This is Critical tier per
-`docs/18_vibe_coding_guardrails.md` §2 — every function needs human
-line-by-line review before acceptance, not just a passing test, and every
-state-changing function needs its negative test in the same commit (P3).
+**P2 — Chaincode Core Rules, in progress (`docs/14_developer_setup.md` §1.3):**
+- `refdata` (5 functions: `AddReferenceEntry`, `DeprecateReferenceEntry`,
+  `ResolveActiveReference`, `GetReferenceEntryHistory`,
+  `ListReferenceEntries`) and `batch` (2 functions: `CreateBatch`,
+  `SubmitIngredient`) are unit-tested (39 tests) and deployed live to the
+  `compliancetrail` channel, each as its own independently-upgradable
+  chaincode (`ADR-CT-023`).
+- Real cross-chaincode invocation proven on the live network, not mocked:
+  `batch.SubmitIngredient` submitted as `ingredient-qa` genuinely calls
+  `refdata.ResolveActiveReference` via `stub.InvokeChaincode` (TRD §23.1);
+  snapshot fields (`ingredient_reference_entry_id`, versions) exactly match
+  `refdata`'s real ledger state. Both rejection paths (unrecognized value,
+  wrong role) also proven live.
+- **Caught by the live deployment, not by unit tests:** contractapi's
+  response-schema validation requires an explicit `metadata:"...,optional"`
+  struct tag for every nullable field — `json:",omitempty"` alone doesn't
+  register with it. `ReferenceEntry` failed schema validation on its first
+  real invoke; unit tests never caught it because they call functions
+  directly, skipping contractapi's dispatch layer entirely. Fixed across
+  both modules, redeployed as v1.1. Full incident write-up in
+  `docs/14_developer_setup.md` §1.3 — worth reading before writing more
+  contractapi-based chaincode functions.
+- Next: `batch` sequencing functions (production confirmation, verdict,
+  export) and correction-mode ingredient submission
+  (`supersedes_record_id`), then P3 (formal negative-test-matrix pass) once
+  P2's function set is complete. Critical tier per
+  `docs/18_vibe_coding_guardrails.md` §2 throughout — every function needs
+  human line-by-line review before acceptance, not just a passing test.

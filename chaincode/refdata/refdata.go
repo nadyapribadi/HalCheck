@@ -54,18 +54,25 @@ const (
 //
 // SupersededBy also has no defined chaincode write path yet (see
 // DeprecateReferenceEntry) -- it stays empty until that gap is resolved.
+// Note on the metadata struct tags below: contractapi generates its own
+// JSON schema from these tags for response validation, and it is NOT
+// driven by the json tag's `omitempty` -- a field is schema-required
+// unless it carries its own `metadata:"...,optional"` tag. Missing this
+// was a real bug caught only by a real network invocation (unit tests call
+// these functions directly, bypassing contractapi's schema-validation
+// layer entirely) -- see AGENTS.md/docs/14 P2 notes for the incident.
 type ReferenceEntry struct {
-	EntryID      string      `json:"entry_id"`
-	Type         EntryType   `json:"type"`
-	Value        string      `json:"value"`
-	Version      string      `json:"version"`
-	Status       EntryStatus `json:"status"`
-	SupersededBy string      `json:"superseded_by,omitempty"`
-	Metadata     string      `json:"metadata,omitempty"` // opaque, type-specific JSON
-	Timestamp    string      `json:"timestamp"`
-	AddedBy      string      `json:"added_by"`
-	DeprecatedBy string      `json:"deprecated_by,omitempty"`
-	DeprecatedAt string      `json:"deprecated_at,omitempty"`
+	EntryID      string      `json:"entry_id" metadata:"entry_id"`
+	Type         EntryType   `json:"type" metadata:"type"`
+	Value        string      `json:"value" metadata:"value"`
+	Version      string      `json:"version" metadata:"version"`
+	Status       EntryStatus `json:"status" metadata:"status"`
+	SupersededBy string      `json:"superseded_by,omitempty" metadata:"superseded_by,optional"`
+	Metadata     string      `json:"metadata,omitempty" metadata:"metadata,optional"` // opaque, type-specific JSON
+	Timestamp    string      `json:"timestamp" metadata:"timestamp"`
+	AddedBy      string      `json:"added_by" metadata:"added_by"`
+	DeprecatedBy string      `json:"deprecated_by,omitempty" metadata:"deprecated_by,optional"`
+	DeprecatedAt string      `json:"deprecated_at,omitempty" metadata:"deprecated_at,optional"`
 }
 
 // RefdataContract implements the reference-data chaincode functions.
@@ -310,10 +317,10 @@ func (c *RefdataContract) ResolveActiveReference(
 // ReferenceEntryHistoryItem is one point in a reference entry's full
 // history -- one per ledger write to that entry's key, oldest first.
 type ReferenceEntryHistoryItem struct {
-	TxID      string          `json:"tx_id"`
-	Timestamp string          `json:"timestamp"`
-	IsDelete  bool            `json:"is_delete"`
-	Entry     *ReferenceEntry `json:"entry,omitempty"`
+	TxID      string          `json:"tx_id" metadata:"tx_id"`
+	Timestamp string          `json:"timestamp" metadata:"timestamp"`
+	IsDelete  bool            `json:"is_delete" metadata:"is_delete"`
+	Entry     *ReferenceEntry `json:"entry,omitempty" metadata:"entry,optional"`
 }
 
 // GetReferenceEntryHistory returns every recorded version of a reference
