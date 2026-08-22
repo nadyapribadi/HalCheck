@@ -13,12 +13,15 @@ import (
 	"crypto/x509/pkix"
 	"encoding/pem"
 	"math/big"
+	"sort"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/hyperledger/fabric-chaincode-go/v2/pkg/attrmgr"
 	"github.com/hyperledger/fabric-chaincode-go/v2/shim"
 	"github.com/hyperledger/fabric-contract-api-go/v2/contractapi"
+	"github.com/hyperledger/fabric-protos-go-apiv2/ledger/queryresult"
 	"github.com/hyperledger/fabric-protos-go-apiv2/msp"
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/timestamppb"
@@ -28,11 +31,19 @@ type mockChaincodeStub struct {
 	shim.ChaincodeStubInterface
 	creator []byte
 	state   map[string][]byte
+	// history records every PutState call per key, oldest first -- backs
+	// GetHistoryForKey the same way a real peer's block history would.
+	history map[string][]*queryresult.KeyModification
 	txID    string
 }
 
 func newMockChaincodeStub(creator []byte) *mockChaincodeStub {
-	return &mockChaincodeStub{creator: creator, state: map[string][]byte{}, txID: "test-tx-id"}
+	return &mockChaincodeStub{
+		creator: creator,
+		state:   map[string][]byte{},
+		history: map[string][]*queryresult.KeyModification{},
+		txID:    "test-tx-id",
+	}
 }
 
 func (m *mockChaincodeStub) GetCreator() ([]byte, error) { return m.creator, nil }
@@ -41,6 +52,12 @@ func (m *mockChaincodeStub) GetState(key string) ([]byte, error) { return m.stat
 
 func (m *mockChaincodeStub) PutState(key string, value []byte) error {
 	m.state[key] = value
+	m.history[key] = append(m.history[key], &queryresult.KeyModification{
+		TxId:      m.txID,
+		Value:     value,
+		Timestamp: timestamppb.New(time.Date(2026, 7, 1, 0, 0, 0, 0, time.UTC)),
+		IsDelete:  false,
+	})
 	return nil
 }
 
@@ -52,6 +69,69 @@ func (m *mockChaincodeStub) GetTxTimestamp() (*timestamppb.Timestamp, error) {
 
 func (m *mockChaincodeStub) CreateCompositeKey(objectType string, attributes []string) (string, error) {
 	return shim.CreateCompositeKey(objectType, attributes)
+}
+
+func (m *mockChaincodeStub) GetHistoryForKey(key string) (shim.HistoryQueryIteratorInterface, error) {
+	return &mockHistoryIterator{items: m.history[key]}, nil
+}
+
+// GetStateByPartialCompositeKey matches every stored key whose composite
+// encoding starts with objectType+attributes -- the real semantics
+// (CreateCompositeKey's prefix IS the partial-key query string; that's
+// exactly how Fabric implements this against CouchDB/LevelDB range scans
+// too). Results are sorted by key for deterministic test assertions --
+// real Fabric doesn't guarantee an order, but a mock returning random Go
+// map iteration order would make every caller's test flaky for no reason.
+func (m *mockChaincodeStub) GetStateByPartialCompositeKey(objectType string, attributes []string) (shim.StateQueryIteratorInterface, error) {
+	prefix, err := shim.CreateCompositeKey(objectType, attributes)
+	if err != nil {
+		return nil, err
+	}
+
+	var matched []*queryresult.KV
+	for key, value := range m.state {
+		if strings.HasPrefix(key, prefix) {
+			matched = append(matched, &queryresult.KV{Key: key, Value: value})
+		}
+	}
+	sort.Slice(matched, func(i, j int) bool { return matched[i].Key < matched[j].Key })
+
+	return &mockStateQueryIterator{items: matched}, nil
+}
+
+// mockHistoryIterator implements shim.HistoryQueryIteratorInterface over an
+// in-memory slice -- GetHistoryForKey's real return type, just backed by
+// the mock stub's own recorded history instead of a peer's block store.
+type mockHistoryIterator struct {
+	items []*queryresult.KeyModification
+	pos   int
+}
+
+func (it *mockHistoryIterator) HasNext() bool { return it.pos < len(it.items) }
+
+func (it *mockHistoryIterator) Close() error { return nil }
+
+func (it *mockHistoryIterator) Next() (*queryresult.KeyModification, error) {
+	item := it.items[it.pos]
+	it.pos++
+	return item, nil
+}
+
+// mockStateQueryIterator implements shim.StateQueryIteratorInterface over
+// an in-memory slice -- GetStateByPartialCompositeKey's real return type.
+type mockStateQueryIterator struct {
+	items []*queryresult.KV
+	pos   int
+}
+
+func (it *mockStateQueryIterator) HasNext() bool { return it.pos < len(it.items) }
+
+func (it *mockStateQueryIterator) Close() error { return nil }
+
+func (it *mockStateQueryIterator) Next() (*queryresult.KV, error) {
+	item := it.items[it.pos]
+	it.pos++
+	return item, nil
 }
 
 type mockTransactionContext struct {
@@ -125,6 +205,7 @@ func (ctx *mockTransactionContext) actingAs(t *testing.T, mspID, role string) *m
 	return &mockTransactionContext{stub: &mockChaincodeStub{
 		creator: identityCreatorBytes(t, mspID, role),
 		state:   ctx.stub.state,
+		history: ctx.stub.history,
 		txID:    ctx.stub.txID,
 	}}
 }

@@ -36,15 +36,36 @@ func (t EntryType) valid() bool {
 	}
 }
 
-// ReferenceEntry mirrors docs/06_erd.md's REFERENCE_ENTRY exactly.
+// EntryStatus is a closed enum -- docs/06_erd.md REFERENCE_ENTRY.status.
+type EntryStatus string
+
+const (
+	StatusActive     EntryStatus = "active"
+	StatusDeprecated EntryStatus = "deprecated"
+)
+
+// ReferenceEntry mirrors docs/06_erd.md's REFERENCE_ENTRY, with one
+// addition: DeprecatedBy/DeprecatedAt. The ERD lists only a single
+// added_by/timestamp pair, but FRD-CHAIN-REFDATA-003 requires deprecation
+// to *also* be recorded with its own acting identity and timestamp --
+// there's no field in the ERD for that. Added here to satisfy the FRD
+// (the more specific, P0-priority requirement); flagging the ERD gap is a
+// documentation follow-up, not something to silently drop.
+//
+// SupersededBy also has no defined chaincode write path yet (see
+// DeprecateReferenceEntry) -- it stays empty until that gap is resolved.
 type ReferenceEntry struct {
-	EntryID   string    `json:"entry_id"`
-	Type      EntryType `json:"type"`
-	Value     string    `json:"value"`
-	Version   string    `json:"version"`
-	Metadata  string    `json:"metadata,omitempty"` // opaque, type-specific JSON
-	Timestamp string    `json:"timestamp"`
-	AddedBy   string    `json:"added_by"`
+	EntryID      string      `json:"entry_id"`
+	Type         EntryType   `json:"type"`
+	Value        string      `json:"value"`
+	Version      string      `json:"version"`
+	Status       EntryStatus `json:"status"`
+	SupersededBy string      `json:"superseded_by,omitempty"`
+	Metadata     string      `json:"metadata,omitempty"` // opaque, type-specific JSON
+	Timestamp    string      `json:"timestamp"`
+	AddedBy      string      `json:"added_by"`
+	DeprecatedBy string      `json:"deprecated_by,omitempty"`
+	DeprecatedAt string      `json:"deprecated_at,omitempty"`
 }
 
 // RefdataContract implements the reference-data chaincode functions.
@@ -69,6 +90,14 @@ func requireSystemAdmin(ctx contractapi.TransactionContextInterface) error {
 // direct GetState lookup rather than a range query.
 func referenceEntryKey(ctx contractapi.TransactionContextInterface, entryType EntryType, value string) (string, error) {
 	return ctx.GetStub().CreateCompositeKey("referenceEntry", []string{string(entryType), value})
+}
+
+func currentTxTimestamp(ctx contractapi.TransactionContextInterface) (string, error) {
+	txTimestamp, err := ctx.GetStub().GetTxTimestamp()
+	if err != nil {
+		return "", fmt.Errorf("failed to read transaction timestamp: %w", err)
+	}
+	return time.Unix(txTimestamp.GetSeconds(), int64(txTimestamp.GetNanos())).UTC().Format(time.RFC3339), nil
 }
 
 // AddReferenceEntry adds a new reference-data entry (FRD-CHAIN-REFDATA-001).
@@ -112,9 +141,9 @@ func (c *RefdataContract) AddReferenceEntry(
 		return nil, fmt.Errorf("failed to resolve caller identity: %w", err)
 	}
 
-	txTimestamp, err := ctx.GetStub().GetTxTimestamp()
+	timestamp, err := currentTxTimestamp(ctx)
 	if err != nil {
-		return nil, fmt.Errorf("failed to read transaction timestamp: %w", err)
+		return nil, err
 	}
 
 	entry := ReferenceEntry{
@@ -122,8 +151,9 @@ func (c *RefdataContract) AddReferenceEntry(
 		Type:      et,
 		Value:     value,
 		Version:   "1",
+		Status:    StatusActive,
 		Metadata:  metadata,
-		Timestamp: time.Unix(txTimestamp.GetSeconds(), int64(txTimestamp.GetNanos())).UTC().Format(time.RFC3339),
+		Timestamp: timestamp,
 		AddedBy:   addedBy,
 	}
 
@@ -139,50 +169,35 @@ func (c *RefdataContract) AddReferenceEntry(
 	return &entry, nil
 }
 
-// DeprecationRecord marks a reference entry as deprecated without ever
-// touching the original entry's own ledger key. Deprecation status is
-// derived at read time (ResolveActiveReference, next) from whether this
-// record exists -- the same "supersede without touching the original"
-// discipline already used for INGREDIENT_RECORD/PRODUCTION_RECORD
-// (docs/06_erd.md §4). Every PutState call anywhere in this module writes
-// to a key that has never been written before, which is what makes "no
-// update function exists" structurally true here, not just a convention
-// (Guardrails §3a Rule 1) -- deprecating an entry is a new fact recorded
-// about it, not an edit to it.
-type DeprecationRecord struct {
-	EntryID      string `json:"entry_id"`
-	DeprecatedBy string `json:"deprecated_by"`
-	Timestamp    string `json:"timestamp"`
-}
-
-// deprecationKey deliberately takes the same (type, value) pair
-// referenceEntryKey does, rather than that already-built composite key
-// string -- a composite key's encoding embeds the U+0000 delimiter byte,
-// which Fabric rejects if passed back in as an attribute of another
-// composite key.
-func deprecationKey(ctx contractapi.TransactionContextInterface, entryType EntryType, value string) (string, error) {
-	return ctx.GetStub().CreateCompositeKey("deprecation", []string{string(entryType), value})
-}
-
 // DeprecateReferenceEntry marks an existing entry deprecated
 // (FRD-CHAIN-REFDATA-002). System Admin only. Rejects deprecating a value
 // that was never added, and rejects deprecating something already
 // deprecated -- deprecation is a one-way, one-time transition.
 //
+// This is the one deliberate exception to "every PutState call in this
+// module writes to a brand-new key": it re-writes the entry's own key, but
+// only ever to flip Status (and set DeprecatedBy/DeprecatedAt) -- Type,
+// Value, Version, Metadata, Timestamp, and AddedBy are read back unchanged
+// from the existing entry and never altered. That's a narrowly-scoped,
+// single-purpose state transition, not the generic UpdateReferenceEntry
+// function Guardrails §3a Rule 1 forbids (no function here accepts a new
+// Value/Type/Metadata for an existing entry_id). Matches
+// docs/05_architecture.md §6's own description of this flow: "mark X
+// deprecated (not deleted)."
+//
 // NOTE: neither FRD-CHAIN-REFDATA-002 nor the API reference
 // (17_api_reference.md, POST /reference-data/:type/:entryId/deprecate)
 // defines a parameter for naming a replacement entry at deprecation time --
 // the Screen Requirements' Deprecate modal is explicitly fieldless ("no
-// reason field, unlike Fail verdicts"). So REFERENCE_ENTRY.superseded_by
-// (06_erd.md) has no defined chaincode write path yet. This function does
-// not invent one; it implements exactly what's specified. Populating
-// superseded_by is an open gap to raise as a follow-up requirement, not
-// something to guess at here.
+// reason field, unlike Fail verdicts"). So SupersededBy has no defined
+// write path yet. This function does not invent one; it implements exactly
+// what's specified. Populating SupersededBy is an open gap to raise as a
+// follow-up requirement, not something to guess at here.
 func (c *RefdataContract) DeprecateReferenceEntry(
 	ctx contractapi.TransactionContextInterface,
 	entryType string,
 	value string,
-) (*DeprecationRecord, error) {
+) (*ReferenceEntry, error) {
 	if err := requireSystemAdmin(ctx); err != nil {
 		return nil, err
 	}
@@ -192,29 +207,25 @@ func (c *RefdataContract) DeprecateReferenceEntry(
 		return nil, fmt.Errorf("invalid_entry_type: %q is not one of ingredient, supplier, standard, fail_reason", entryType)
 	}
 
-	entryKey, err := referenceEntryKey(ctx, et, value)
+	key, err := referenceEntryKey(ctx, et, value)
 	if err != nil {
 		return nil, fmt.Errorf("failed to build composite key: %w", err)
 	}
 
-	existing, err := ctx.GetStub().GetState(entryKey)
+	existingBytes, err := ctx.GetStub().GetState(key)
 	if err != nil {
 		return nil, fmt.Errorf("failed to read world state: %w", err)
 	}
-	if existing == nil {
+	if existingBytes == nil {
 		return nil, fmt.Errorf("not_a_recognized_value: no %s entry with value %q exists", entryType, value)
 	}
 
-	depKey, err := deprecationKey(ctx, et, value)
-	if err != nil {
-		return nil, fmt.Errorf("failed to build deprecation key: %w", err)
+	var entry ReferenceEntry
+	if err := json.Unmarshal(existingBytes, &entry); err != nil {
+		return nil, fmt.Errorf("failed to unmarshal reference entry: %w", err)
 	}
 
-	alreadyDeprecated, err := ctx.GetStub().GetState(depKey)
-	if err != nil {
-		return nil, fmt.Errorf("failed to read world state: %w", err)
-	}
-	if alreadyDeprecated != nil {
+	if entry.Status == StatusDeprecated {
 		return nil, fmt.Errorf("already_deprecated: %s entry %q is already deprecated", entryType, value)
 	}
 
@@ -222,28 +233,195 @@ func (c *RefdataContract) DeprecateReferenceEntry(
 	if err != nil {
 		return nil, fmt.Errorf("failed to resolve caller identity: %w", err)
 	}
-
-	txTimestamp, err := ctx.GetStub().GetTxTimestamp()
+	timestamp, err := currentTxTimestamp(ctx)
 	if err != nil {
-		return nil, fmt.Errorf("failed to read transaction timestamp: %w", err)
+		return nil, err
 	}
 
-	record := DeprecationRecord{
-		EntryID:      entryKey,
-		DeprecatedBy: deprecatedBy,
-		Timestamp:    time.Unix(txTimestamp.GetSeconds(), int64(txTimestamp.GetNanos())).UTC().Format(time.RFC3339),
-	}
+	// Only these two fields change. Everything else on entry is exactly
+	// what was read back above.
+	entry.Status = StatusDeprecated
+	entry.DeprecatedBy = deprecatedBy
+	entry.DeprecatedAt = timestamp
 
-	recordJSON, err := json.Marshal(record)
+	entryJSON, err := json.Marshal(entry)
 	if err != nil {
-		return nil, fmt.Errorf("failed to marshal deprecation record: %w", err)
+		return nil, fmt.Errorf("failed to marshal reference entry: %w", err)
 	}
 
-	if err := ctx.GetStub().PutState(depKey, recordJSON); err != nil {
+	if err := ctx.GetStub().PutState(key, entryJSON); err != nil {
 		return nil, fmt.Errorf("failed to write to world state: %w", err)
 	}
 
-	return &record, nil
+	return &entry, nil
+}
+
+// ResolveActiveReference resolves a controlled value against the active
+// reference list. `batch` invokes this in the same Fabric transaction used
+// to submit an ingredient/supplier/standard reference (TRD §23.1) -- the
+// entry key read here enters that transaction's read set, which is exactly
+// what makes a concurrent deprecation produce either a consistent
+// pre-deprecation snapshot or an MVCC conflict, never a mixed state
+// (FRD-CHAIN-CONCURRENCY-001, TRD §23.6).
+//
+// No role restriction: this is a read, not a mutation, and any operational
+// role may need to validate its own submission against the current
+// reference list. Guardrails' "no rule enforced only outside chaincode"
+// principle governs writes; nothing in FRD/TRD restricts who may read.
+//
+// A deprecated entry resolves as not_a_recognized_value, identical to an
+// entry that was never added -- from a new submission's point of view,
+// "deprecated" and "never existed" carry the same consequence.
+func (c *RefdataContract) ResolveActiveReference(
+	ctx contractapi.TransactionContextInterface,
+	entryType string,
+	value string,
+) (*ReferenceEntry, error) {
+	et := EntryType(entryType)
+	if !et.valid() {
+		return nil, fmt.Errorf("invalid_entry_type: %q is not one of ingredient, supplier, standard, fail_reason", entryType)
+	}
+
+	key, err := referenceEntryKey(ctx, et, value)
+	if err != nil {
+		return nil, fmt.Errorf("failed to build composite key: %w", err)
+	}
+
+	entryBytes, err := ctx.GetStub().GetState(key)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read world state: %w", err)
+	}
+	if entryBytes == nil {
+		return nil, fmt.Errorf("not_a_recognized_value: no %s entry with value %q exists", entryType, value)
+	}
+
+	var entry ReferenceEntry
+	if err := json.Unmarshal(entryBytes, &entry); err != nil {
+		return nil, fmt.Errorf("failed to unmarshal reference entry: %w", err)
+	}
+
+	if entry.Status != StatusActive {
+		return nil, fmt.Errorf("not_a_recognized_value: %s entry %q is deprecated", entryType, value)
+	}
+
+	return &entry, nil
+}
+
+// ReferenceEntryHistoryItem is one point in a reference entry's full
+// history -- one per ledger write to that entry's key, oldest first.
+type ReferenceEntryHistoryItem struct {
+	TxID      string          `json:"tx_id"`
+	Timestamp string          `json:"timestamp"`
+	IsDelete  bool            `json:"is_delete"`
+	Entry     *ReferenceEntry `json:"entry,omitempty"`
+}
+
+// GetReferenceEntryHistory returns every recorded version of a reference
+// entry, in write order (FRD-CHAIN-REFDATA-004: "deprecated reference-data
+// entries must remain visible in reference-data history, not hidden").
+//
+// DeprecateReferenceEntry writes to the same key AddReferenceEntry created
+// (see its comment for why that's a narrowly-scoped exception, not a
+// generic update). That means a plain GetState/ResolveActiveReference call
+// only ever sees the latest version -- this function is what makes the
+// pre-deprecation state actually retrievable, not just theoretically
+// recoverable. Fabric's GetHistoryForKey walks the ledger's own append-only
+// write history for this key; IsDelete is always false here since no
+// delete ever happens, included for completeness against the iterator's
+// real shape.
+//
+// No role restriction, matching ResolveActiveReference: this is a read.
+func (c *RefdataContract) GetReferenceEntryHistory(
+	ctx contractapi.TransactionContextInterface,
+	entryType string,
+	value string,
+) ([]ReferenceEntryHistoryItem, error) {
+	et := EntryType(entryType)
+	if !et.valid() {
+		return nil, fmt.Errorf("invalid_entry_type: %q is not one of ingredient, supplier, standard, fail_reason", entryType)
+	}
+
+	key, err := referenceEntryKey(ctx, et, value)
+	if err != nil {
+		return nil, fmt.Errorf("failed to build composite key: %w", err)
+	}
+
+	iterator, err := ctx.GetStub().GetHistoryForKey(key)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read history for key: %w", err)
+	}
+	defer iterator.Close()
+
+	history := []ReferenceEntryHistoryItem{}
+	for iterator.HasNext() {
+		mod, err := iterator.Next()
+		if err != nil {
+			return nil, fmt.Errorf("failed to read next history entry: %w", err)
+		}
+
+		item := ReferenceEntryHistoryItem{
+			TxID:      mod.GetTxId(),
+			Timestamp: mod.GetTimestamp().AsTime().UTC().Format(time.RFC3339),
+			IsDelete:  mod.GetIsDelete(),
+		}
+
+		if !mod.GetIsDelete() {
+			var entry ReferenceEntry
+			if err := json.Unmarshal(mod.GetValue(), &entry); err != nil {
+				return nil, fmt.Errorf("failed to unmarshal historical entry: %w", err)
+			}
+			item.Entry = &entry
+		}
+
+		history = append(history, item)
+	}
+
+	if len(history) == 0 {
+		return nil, fmt.Errorf("not_a_recognized_value: no %s entry with value %q exists", entryType, value)
+	}
+
+	return history, nil
+}
+
+// ListReferenceEntries returns every entry of a given type -- active and
+// deprecated together, deprecated ones always included, never filtered
+// out. This is what actually powers the Reference Data List screen
+// (docs/12_seed_data_specification.md §12), as distinct from
+// GetReferenceEntryHistory (one entry's full version history):
+// FRD-CHAIN-REFDATA-004 needs both -- this for browsing every entry of a
+// type, that for audit-grade proof that nothing was silently altered.
+//
+// No role restriction, matching the other read functions in this module.
+func (c *RefdataContract) ListReferenceEntries(
+	ctx contractapi.TransactionContextInterface,
+	entryType string,
+) ([]*ReferenceEntry, error) {
+	et := EntryType(entryType)
+	if !et.valid() {
+		return nil, fmt.Errorf("invalid_entry_type: %q is not one of ingredient, supplier, standard, fail_reason", entryType)
+	}
+
+	iterator, err := ctx.GetStub().GetStateByPartialCompositeKey("referenceEntry", []string{string(et)})
+	if err != nil {
+		return nil, fmt.Errorf("failed to query reference entries: %w", err)
+	}
+	defer iterator.Close()
+
+	entries := []*ReferenceEntry{}
+	for iterator.HasNext() {
+		kv, err := iterator.Next()
+		if err != nil {
+			return nil, fmt.Errorf("failed to read next reference entry: %w", err)
+		}
+
+		var entry ReferenceEntry
+		if err := json.Unmarshal(kv.GetValue(), &entry); err != nil {
+			return nil, fmt.Errorf("failed to unmarshal reference entry: %w", err)
+		}
+		entries = append(entries, &entry)
+	}
+
+	return entries, nil
 }
 
 func main() {

@@ -123,10 +123,12 @@ erDiagram
         string value
         string version
         string status "enum: active | deprecated"
-        string superseded_by FK "nullable, self-referencing"
+        string superseded_by FK "nullable, self-referencing -- no chaincode write path defined yet (see 03_frd.md FRD-CHAIN-REFDATA-002 note); stays empty until a follow-up requirement resolves it"
         json metadata "type-specific, e.g. default_halal_risk for ingredient type"
-        datetime timestamp
+        datetime timestamp "set at creation, never changes"
         string added_by FK
+        string deprecated_by FK "nullable, set only when status = deprecated -- added during P2 chaincode implementation to satisfy FRD-CHAIN-REFDATA-003's requirement that deprecation itself be recorded with its own acting identity and timestamp, which this entity's original single added_by/timestamp pair couldn't express"
+        datetime deprecated_at "nullable, set only when status = deprecated"
     }
 
     AUDIT_LOG_ENTRY {

@@ -12,6 +12,7 @@
 
 - **v0.2.0:** Added batch creation with Intended Market, fail `flaggedRecordId`, correction `supersedesRecordId`, read-only export destination, and Integrity Sandbox endpoints.
 - **v0.3.0:** Replaced client verdict payload fields with a signed engine-attestation contract and added `audit_unavailable`.
+- **v0.4.0:** Added `invalid_entry_type`, `duplicate_entry`, `already_deprecated`, and `invalid_market` to §14, surfaced by the P2 `refdata`/`batch` chaincode implementation.
 
 ## 1. Purpose
 
@@ -330,9 +331,15 @@ not_a_recognized_value
 concurrent_modification
 ledger_unavailable
 audit_unavailable
+invalid_entry_type
+duplicate_entry
+already_deprecated
+invalid_market
 ```
 
 Every rejection returns a stable `reason` code plus a human-readable `message`. Clients key off `reason`, never parse `message` for logic.
+
+**Added during P2 chaincode implementation** (`chaincode/refdata`, `chaincode/batch`): `invalid_entry_type` and `invalid_market` cover a controlled-enum parameter that doesn't match any allowed value; `duplicate_entry` covers `AddReferenceEntry` rejecting an exact `(type, value)` pair that already exists; `already_deprecated` covers `DeprecateReferenceEntry` rejecting a second deprecation of the same entry. None of these are reachable through the normal UI (all four fields are dropdown-constrained per `11_screen_requirements.md`), but they're real chaincode-level rejections a direct/bypassing request can trigger — the same defense-in-depth discipline the Integrity Sandbox demonstrates elsewhere.
 
 ## 15. Compatibility Rules
 
