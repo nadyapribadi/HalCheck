@@ -227,3 +227,13 @@ Each entry: Status / Decision / Reason / Consequence, matching the reference dec
 **Decision:** All UI copy across every screen is in English.
 
 **Reason:** Portfolio-audience-first framing, given this project's primary purpose as a demonstration piece.
+
+## ADR-CT-026: Pre-build authority closure
+
+**Status:** Accepted
+
+**Decision:** Before P0, resolve the five authority and data-model gaps in TRD §23: chaincode-owned reference-data validation, signed verdict attestations, fail-closed audit delivery, a canonical Role × Field × Access matrix, and uniform ingredient/production correction linkage.
+
+**Reason:** Each gap could otherwise make a backend behavior appear authoritative without a matching enforceable ledger rule, undermining the project's central proof claim.
+
+**Consequence:** TRD §23 is a P0 prerequisite and its acceptance tests block P2 completion until implemented.

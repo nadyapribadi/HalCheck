@@ -11,6 +11,7 @@
 ## Changelog
 
 - **v0.2.0:** Added batch creation with Intended Market, fail `flaggedRecordId`, correction `supersedesRecordId`, read-only export destination, and Integrity Sandbox endpoints.
+- **v0.3.0:** Replaced client verdict payload fields with a signed engine-attestation contract and added `audit_unavailable`.
 
 ## 1. Purpose
 
@@ -162,19 +163,10 @@ Rejected if no ingredient record exists yet:
 
 ```json
 POST /api/v1/batches/:batchId/verdict
-{
-  "verdict": "pass",
-  "governingRegulation": "PP 42/2024",
-  "recognitionCheck": {
-    "issuingBody": "JAKIM",
-    "requiringBody": "BPJPH",
-    "recognized": true,
-    "asOfDate": "..."
-  }
-}
+{}
 ```
 
-`verdict` value is engine-determined server-side, not client-set. Fail verdicts use the same endpoint shape with `failReason` populated from the controlled catalog and `flaggedRecordId` populated with the specific ingredient or production record that triggered the failure.
+The backend obtains the attestation from the existing engine. `batch` chaincode verifies its signature and bindings; clients never submit an attestation, verdict, regulation, recognition result, Fail reason, or flagged record directly. A valid Fail attestation records the controlled Fail reason and triggering ingredient or production record.
 
 Fail response shape:
 ```json
@@ -337,6 +329,7 @@ identity_mismatch
 not_a_recognized_value
 concurrent_modification
 ledger_unavailable
+audit_unavailable
 ```
 
 Every rejection returns a stable `reason` code plus a human-readable `message`. Clients key off `reason`, never parse `message` for logic.

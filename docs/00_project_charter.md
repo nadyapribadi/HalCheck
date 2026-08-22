@@ -148,11 +148,11 @@ design -> chaincode design gate (P1.5) -> chaincode -> backend/data
 - `13_implementation_plan.md` — P0–P11 phased build plan, 10-sprint estimate
 - `14_developer_setup.md` — install steps, operational scripts
 - `15_config_reference.md` — environment variables, secrets discipline
-- `16_risk_register.md` — 17 tracked risks
+- `16_risk_register.md` — 18 tracked risks (including one closed design-gap record)
 - `17_api_reference.md` — endpoint specifications
 - `18_vibe_coding_guardrails.md` — AI-assisted development discipline
 - `19_repository_structure.md` — repo layout, `.gitignore`, branch strategy
 - `20_glossary.md` — plain-language term reference
-- `21_decisions.md` — 25 ADR entries
+- `21_decisions.md` — 26 ADR entries
 - `22_requirements_traceability.md` — full PRD-to-implementation matrix
 - `23_roadmap.md` — versioned build path and deferred scope

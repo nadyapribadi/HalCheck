@@ -11,6 +11,7 @@
 ## Changelog
 
 - **v0.2.0:** Added Intended Market to batch creation, flagged-record linkage on Fail verdicts, and single-record correction semantics.
+- **v0.3.0:** Added the chaincode reference-data contract, signed verdict attestation, and fail-closed audit-path behavior.
 
 ## 1. Architecture Summary
 
@@ -199,7 +200,7 @@ Full entity detail lives in `06_erd.md` — this section is a cross-referenced s
 postgresql/
 |-- users
 |-- cached_batch_views          -- indexed: batch_id, status, timestamp
-`-- system_audit_log             -- indexed: timestamp; action field is enum
+`-- system_audit_log             -- indexed: timestamp; event_type/outcome are enums
 
 minio/
 |-- {batchId}/{recordType}/{hash}.{ext}
@@ -213,6 +214,7 @@ batch.created
 ingredient.submitted
 ingredient.corrected
 production.confirmed
+production.corrected
 verdict.recorded
 export.requested
 export.rejected
@@ -227,6 +229,8 @@ ai.explanation.requested
 
 # Audit-log-originated (system-level)
 audit.login
+audit.view
+audit.state_change_attempted
 audit.access_denied
 audit.field_restricted_access_attempt
 ```
@@ -234,9 +238,11 @@ audit.field_restricted_access_attempt
 ## 12. Security Architecture
 
 - Identity verification happens twice: JWT layer and chaincode layer — applies identically to System Admin actions on reference data.
+- Controlled values are resolved by `refdata` inside the same Fabric transaction used by `batch`; the backend is never the authority for a reference snapshot.
+- Verdict chaincode verifies a signed engine attestation bound to the effective ledger inputs; the backend cannot replace its result.
 - Field-level RBAC enforced in the serialization layer before any response leaves the backend.
 - LLM API calls are strictly outbound-context-only — no credentials, no direct data access, no function-calling capability.
-- Audit log write access enforced at the PostgreSQL grant level, holds even against an application-layer bug.
+- Audit log write access is enforced at the PostgreSQL grant level and a successful audit insert is required before covered protected requests proceed; audit outage fails closed.
 - **Encryption at rest:** not configured for local Docker volumes in this version — acceptable given synthetic demo data; would require explicit configuration before any real data would be appropriate.
 - Concurrency handling relies on ledger-native MVCC, not a custom lock-management component that would itself need threat-modeling.
 
@@ -281,6 +287,6 @@ Tunnel scoped to frontend + backend API ports only. Admin-only routes (reference
 |---|---|---|
 | Fabric peer/orderer down | Total — no submissions or reads possible | Backend returns `ledger_unavailable` after timeout; no partial function |
 | CouchDB down | Query/read degraded | Cached PostgreSQL views still serve reads; new writes still succeed via ledger directly |
-| PostgreSQL down | Cache/audit logging lost | Ledger writes still succeed (source of truth unaffected); reads fall back to slower direct-ledger queries; audit logging pauses — System Admin would need to notice on recovery |
+| PostgreSQL audit path down | Protected request path unavailable | Backend returns `audit_unavailable`; it returns no protected data and submits no ledger transaction. Cache-only degradation may be handled separately only when the audit insert still succeeds. |
 | MinIO down | File-dependent actions degraded | Ingredient upload requiring file attachment fails; already-recorded ledger text data remains fully accessible |
 | LLM API unreachable | AI Explanation only | Graceful "unavailable" message; zero impact on any core batch workflow |

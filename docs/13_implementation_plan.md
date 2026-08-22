@@ -41,6 +41,7 @@ Phases are grouped by cognitive context to minimize costly context-switching for
 ## 3. Phase Detail
 
 ### P0 — Foundation + Ops Hygiene
+- Confirm the accepted pre-build authority closure (TRD §23) is synchronized before infrastructure work begins.
 - Install Docker, Go, Node.js, clone `fabric-samples`; bring up the unmodified sample test-network.
 - Confirm basic chaincode install/invoke works using sample chaincode before writing custom logic.
 - Add Docker Compose health checks and `depends_on: condition: service_healthy`.
@@ -57,14 +58,15 @@ Phases are grouped by cognitive context to minimize costly context-switching for
 **Exit criteria:** six distinct, verifiable identities exist and can be used to submit test transactions.
 
 ### P1.5 — Chaincode Design Gate (critical path, hard blocker)
-This phase produces decisions, not code. Nothing in P2 begins until all four are resolved and documented:
+This phase produces decisions, not code. Nothing in P2 begins until the four original decisions and the pre-build authority closure are resolved and documented:
 
 1. **Verdict authority — RESOLVED: binding.** The compliance engine's Pass/Fail output is final; the Compliance Officer has no override capability (FRD-CHAIN-VERDICT-005).
 2. **Concurrency handling — RESOLVED: native MVCC.** Rely on Fabric's native read-write conflict detection; backend catches the resulting error and returns a clear "please refresh" response — no custom locking layer.
 3. **Chaincode bundling — RESOLVED: two independent deployments.** `batch` and `refdata` as separate chaincode definitions on the same channel, independently upgradable.
 4. **Data model — RESOLVED: denormalized snapshot.** Each batch record stores the standard's citation text and version identifier directly at submission time, not a live foreign key. Full entity detail in `06_erd.md`.
+5. **Authority closure — RESOLVED.** Reference snapshots are chaincode-resolved; verdicts use verified engine attestations; audit delivery fails closed; the canonical RBAC matrix and production-correction model are defined in TRD §23.
 
-**Exit criteria:** all four decisions documented (already reflected in `03_frd.md`, `04_trd.md`, `05_architecture.md`, `06_erd.md`) before a single line of chaincode is written for P2.
+**Exit criteria:** all decisions documented and synchronized in `03_frd.md`, `04_trd.md`, `05_architecture.md`, and `06_erd.md` before a single line of chaincode is written for P2.
 
 ### P2 — Chaincode Core Rules
 - Define ledger record types per the ERD (ingredient, production, verdict, export, reference data).
@@ -167,4 +169,4 @@ Sprint 10:    P9, P10, P11    (access, hardening, documentation closure)
 - No default credential survives past P0 into any phase involving external reachability.
 - No tunnel activation before P10's security gate checklist passes.
 - No scope addition without a new ADR entry first.
-- P1.5 may not be skipped or deferred — no chaincode work in P2 begins until all four decisions are documented, regardless of schedule pressure.
+- P1.5 may not be skipped or deferred — no chaincode work in P2 begins until the original four decisions and the pre-build authority closure are documented, regardless of schedule pressure.

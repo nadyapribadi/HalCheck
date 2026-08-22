@@ -93,7 +93,8 @@ halcheck/
 | `.env`, `.env.local` (real) | Real secrets |
 | `network/wallet/`, any keystore directory | Private keys |
 | `network/crypto-config/` (generated output) | Actual certificates/private keys |
-| `*.pem`, `*.key` | Cryptographic material |
+| `network/organizations/`, `network/channel-artifacts/` | Generated Fabric identities and channel artifacts |
+| `*.pem`, `*.key`, `*.crt`, `*.p12`, `*_sk` | Cryptographic material, including Fabric private-key filenames |
 | Docker volume data (Postgres, CouchDB, MinIO) | Runtime state, not source |
 | Real `connection-profile.json` | May contain real internal endpoints |
 | Logs, `*.log` | May contain sensitive runtime detail even redacted |
@@ -108,8 +109,13 @@ halcheck/
 .env.local
 network/wallet/
 network/crypto-config/
+network/organizations/
+network/channel-artifacts/
 *.pem
 *.key
+*.crt
+*.p12
+*_sk
 
 # Runtime data
 logs/
@@ -168,3 +174,11 @@ chore: rotate default MinIO credentials
 - [ ] No `.env` (non-example) present in `git status`
 - [ ] No generated `crypto-config/` or `wallet/` output staged
 - [ ] Dependency scan passed (see Developer Setup Section 12)
+
+## 11. Documentation and Repository Hygiene Acceptance
+
+**Status:** Accepted on 2026-08-22.
+
+The pre-P0 baseline was checked for documentation consistency, untracked/generated material, ignore coverage, tracked cryptographic material, high-confidence secret markers in the current non-document tree and Git history, and local numbered-document links. No secret or generated material was found. `backup-volumes.sh` and `health-check.sh` are executable and passed shell syntax validation.
+
+The acceptance added ignore coverage for `network/organizations/`, `network/channel-artifacts/`, `*.crt`, `*.p12`, and Fabric private-key filenames ending in `_sk`. It does not replace P0 runtime validation, dependency scanning, or later security gates. Before retaining generated Fabric material, rerun the tracked-file and secret checks.

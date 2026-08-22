@@ -85,6 +85,8 @@ Separately (correctness, not access-control):
 | T-023 | A third-party dependency contains a known vulnerability, introduced without detection | Dependency scanning required before any dependency addition is committed |
 | T-024 | Repeated failed/denied access attempts go unnoticed because the audit log is purely passive | Audit Log Viewer highlights any identity with 3+ denied attempts within an hour |
 | T-025 | JWT secret rotation performed without understanding its blast radius | Documented: rotation invalidates all active sessions immediately — accepted behavior, not an incident |
+| T-026 | Backend or client attempts to record a forged, stale, or altered engine verdict | `batch` verifies the signed engine attestation and its binding to the effective ledger-input digest, market, engine/rules release, result, and Fail details |
+| T-027 | Audit-store outage creates an unaccounted protected request or ledger submission | Successful audit insertion is a precondition for every covered request; outage returns `audit_unavailable` before data is returned or chaincode is invoked |
 
 ## 5. Security Requirements
 
@@ -99,6 +101,8 @@ Separately (correctness, not access-control):
 - Field-level access rules live in one shared, auditable configuration.
 - Dependency hygiene: no new dependency added without a scan pass.
 - Concurrency correctness treated as security-adjacent: native MVCC is the accepted mitigation, no custom locking permitted.
+- Engine verdict authority is cryptographically attested and verified in chaincode; the backend cannot assert a result by itself.
+- Audit availability is fail-closed for covered routes; insert-only integrity alone is not treated as evidence of complete coverage.
 
 ## 6. Security Gates by Phase
 

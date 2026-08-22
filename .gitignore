@@ -3,8 +3,13 @@
 .env.local
 network/wallet/
 network/crypto-config/
+network/organizations/
+network/channel-artifacts/
 *.pem
 *.key
+*.crt
+*.p12
+*_sk
 
 # Runtime data
 logs/

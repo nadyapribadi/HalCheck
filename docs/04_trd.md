@@ -6,11 +6,12 @@
 - Module: Compliance Trail
 - Repository: `halcheck`
 - Status: Design complete
-- Version: 0.2.0-planning
+- Version: 0.3.0-planning
 
 ## Changelog
 
 - **v0.2.0:** Added batch-level `intended_market`, fail `flagged_record_id`, and single-record correction linkage to match FRD/ERD updates. Export no longer accepts destination as a user-entered value.
+- **v0.3.0:** Adopted pre-build authority-closure contracts for chaincode-owned reference validation, signed verdict attestations, fail-closed audit delivery, field-level RBAC, and production corrections.
 
 ## 1. Technical Strategy
 
@@ -90,7 +91,7 @@ erDiagram
 
 ## 5. Reference Data Linkage — Resolved
 
-**Decision: denormalized snapshot, not a live foreign key.** Every record type that references standards, ingredients, suppliers, or fail reasons stores the actual value as text at submission time (`ingredient_name_snapshot`, `standard_snapshot`, etc.) — not a foreign key to a `REFERENCE_ENTRY` row that could later be superseded. `REFERENCE_ENTRY` still tracks its own supersession chain for the Reference Data List's own history view, but batch records never live-join against it.
+**Decision: denormalized snapshot, not a live foreign key.** Every record type that references standards, ingredients, suppliers, or fail reasons stores the resolved `entry_id`, version, canonical value, and approved metadata needed by that record at submission time — not a live foreign key to a `REFERENCE_ENTRY` row that could later be superseded. `batch` obtains this snapshot from `refdata.ResolveActiveReference` in the same ledger transaction; a backend lookup is never authoritative. `REFERENCE_ENTRY` still tracks its own supersession chain for the Reference Data List's history view, but batch records never live-join against it.
 
 A batch record is a self-contained fact the moment it's written — matching the ledger's event-sourced nature. A live-referenced version would require the reference table to itself never mutate a row, duplicating work already required for its own deprecation logic.
 
@@ -113,6 +114,8 @@ A batch record is a self-contained fact the moment it's written — matching the
 | Chaincode testing | Every state-changing function requires a paired negative test |
 | Reference data functions | New chaincode functions for add/deprecate reference-data entries; same immutability discipline as batch functions — no update/delete function exists |
 | Reference data versioning | Each reference-data entry carries a version identifier; batch records store the version reference at submission time via snapshot (Section 5), never a live pointer |
+| Reference-data read contract | `batch` validates controlled values by invoking `refdata.ResolveActiveReference` in the same transaction; the returned snapshot enters `batch`'s read set and record payload |
+| Verdict authority | `batch.RecordVerdict` verifies a signed engine attestation against its committed public key and binds it to the effective ledger-input digest, batch, intended market, engine/rules release, result, and Fail details |
 | Concurrency handling | No custom locking. Relies entirely on Fabric's native MVCC read-write conflict detection at the ledger level. Backend catches the resulting `MVCC_READ_CONFLICT` error and translates it to `reason: "concurrent_modification"` before returning to the client |
 
 ## 8. Backend / API Requirements
@@ -120,7 +123,7 @@ A batch record is a self-contained fact the moment it's written — matching the
 - REST API using Express, functioning strictly as a translation layer between the frontend and the Fabric Gateway SDK.
 - JWT-based authentication; the authenticated identity must match the Fabric identity used for each chaincode call.
 - Batch creation captures immutable `intended_market`; export records copy that value as a historical snapshot and never accept a user-entered destination market.
-- Fail verdicts include `flagged_record_id`; correction submissions include `supersedes_record_id` and may supersede only the flagged record, not the full ingredient set.
+- Fail verdicts include `flagged_record_id`; ingredient and production correction submissions include `supersedes_record_id` and may supersede only the flagged record, not the full batch record set.
 - File uploads (ingredient sheets, evidence documents) handled via Multer, routed to off-chain storage — never written directly to ledger state.
 - CORS restricted to the deployed frontend origin only.
 - Basic rate limiting required once the application is reachable via a public tunnel.
@@ -140,7 +143,7 @@ A batch record is a self-contained fact the moment it's written — matching the
 | PostgreSQL | User accounts, computed batch status cache, System Audit Log | No (except Audit Log — see below) |
 | File storage (MinIO) | Uploaded files, keyed per Section 11 | No |
 
-**System Audit Log** — authoritative for system-level events specifically. `action` field is an enum matching the Event Model list in the Architecture document, not free text. Insert-only at the PostgreSQL grant level: the application's database role has `INSERT` only, no `UPDATE`/`DELETE`.
+**System Audit Log** — authoritative for system-level events specifically. `event_type` and `outcome` are database-enforced enums. A successful audit insert is a precondition for every covered login, view, denied request, and state-changing request; if it cannot commit, the backend returns `audit_unavailable` and does not call chaincode or return protected data. The application's database role has `INSERT` only, no `UPDATE`/`DELETE`.
 
 **Cache reconciliation:** cache is written synchronously immediately after each successful ledger commit, within the same backend request. If the cache write fails after a successful ledger commit, the affected batch's cached row is marked `stale: true` and a structured log entry is written; the next read triggers a reconciliation re-fetch directly from the ledger.
 
@@ -168,7 +171,7 @@ Insert-only at the PostgreSQL grant level (Section 9) — a defense-in-depth gua
 
 ## 14. Field-Level RBAC Requirements
 
-Role × Field × Access matrix maintained as a single shared configuration, consumed by the serialization utility (Section 8) — not scattered per-endpoint logic. Violation attempts logged to the Audit Log (FRD-CHAIN-RBAC-003).
+The canonical Role × Field × Access matrix in Section 23 is maintained as a single shared configuration, consumed by the serialization utility (Section 8) — not scattered per-endpoint logic. Violation attempts logged to the Audit Log (FRD-CHAIN-RBAC-003).
 
 ## 15. AI Integration Requirements
 
@@ -244,3 +247,50 @@ Docker Compose configuration versioned alongside code, not treated as throwaway 
 ## 22. Documentation Requirements
 
 Every enforced business rule traceable to its chaincode function (Requirements Traceability Matrix). A plain-language companion explanation maintained alongside technical docs. Known limitations (host-dependent availability, single-network topology, no independent multi-org hosting, no encryption at rest, no audit log retention policy) stated plainly, not omitted.
+
+## 23. Pre-Build Authority Closure
+
+The following decisions are accepted before P0. They make the existing rules implementable without granting authority to the backend.
+
+### 23.1 Reference-data enforcement
+
+`refdata` owns the supersede-only reference-data namespace. On each controlled-value submission, `batch` invokes `refdata.ResolveActiveReference(type, value)` in the same Fabric transaction and persists the returned `entry_id`, version, canonical value, and required metadata as its immutable snapshot. Backend pre-validation is only for UX. The read enters the transaction read set, so a concurrent deprecation/replacement either yields a consistent snapshot or an MVCC conflict, never a mixed state.
+
+### 23.2 Binding verdict attestation
+
+The existing engine remains outside chaincode. The backend obtains a signed engine attestation; `batch.RecordVerdict` verifies it against a versioned public key committed with the chaincode definition. The attestation binds the batch ID, digest of effective ledger inputs, intended market, engine version, dataset/rules release, result, and, for a Fail, the catalog reason and flagged record ID. The endpoint accepts no client-supplied verdict fields. Chaincode records the attestation digest and releases alongside the verdict. A verification-key change requires a reviewed chaincode lifecycle upgrade.
+
+### 23.3 Complete audit delivery
+
+Audit coverage is an availability precondition, not best-effort logging. Before every covered login, view, denied request, or state-changing request, the backend inserts an audit event. If the insert cannot commit, it returns HTTP 503 `audit_unavailable`, returns no protected data, and does not call chaincode. Audit entries contain database-enforced `event_type` and `outcome`, identity or privacy-safe subject hint, module/route, timestamp, and IP/device data when available. The application role has INSERT only and cannot amend an outcome later.
+
+### 23.4 Canonical Role × Field × Access matrix
+
+`R` means returned after role filtering; `W` means accepted only by its designated submission endpoint; `S` means system-derived and never client-writable; `H` means omitted.
+
+| Data group / field | Ingredient QA | Production QA | Compliance Officer | Export Officer | Brand Owner | System Admin |
+|---|---|---|---|---|---|---|
+| Batch ID, intended market, derived lifecycle status | R/W at creation | R | R | R | R | R |
+| Trail business snapshots, record IDs, timestamps, submitter role/persona, supersession links | R | R | R | R | R | R |
+| Ingredient submission fields | R/W | R | R | R | R | R |
+| Production submission fields | R | R/W | R | R | R | R |
+| Verdict fields, attestation digest, engine/rules release | R | R | R/W (attestation only; result is S) | R | R | R |
+| Export request | R | R | R | R/W (destination is S) | R | R |
+| Reference value, version, active/deprecated status | R | R | R | R | R | R/W (add/deprecate only) |
+| Reference internal metadata and supersession administration | H | H | H | H | H | R/W |
+| Fabric certificate fingerprint, wallet path, JWT claims, credentials, private object key | H | H | H | H | H | H |
+| Audit-log entries, IP/device, subject hints | H | H | H | H | H | R |
+
+Identity, timestamp, source-of-truth status, attestation, and snapshot fields are system-derived. AI context uses only the requesting role's filtered trail. Every omitted-field attempt is audit logged.
+
+### 23.5 Uniform corrections
+
+`PRODUCTION_RECORD.supersedes_record_id` matches the ingredient correction model. A Fail identifies one ingredient or production record. Only the owner role may correct that exact, unsuperseded flagged record in the same batch while the latest effective verdict is Fail. Superseded status is derived from the linked correction; no prior ledger record changes. A fresh verified verdict is required after correction, and export remains blocked until the latest effective verdict is Pass.
+
+### 23.6 Required implementation tests
+
+- Bypass an unlisted controlled value; `batch` must reject it.
+- Concurrently replace reference data during submission; result must be a consistent snapshot or MVCC conflict.
+- Alter every engine-attestation binding; `batch` must reject it.
+- Make the audit store unavailable for login, read, denial, and submission; each must fail closed without a ledger write.
+- Correct a flagged production record as Production QA; reject all incorrect role, record, duplicate, and premature correction attempts.

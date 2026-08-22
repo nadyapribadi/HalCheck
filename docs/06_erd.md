@@ -6,11 +6,12 @@
 - Module: Compliance Trail
 - Repository: `halcheck`
 - Status: Design complete
-- Version: 0.2.0-planning
+- Version: 0.3.0-planning
 
 ## Changelog
 
 - **v0.2.0:** Added `BATCH.intended_market` (captures destination at creation, resolves recognition-directionality sequencing). Added `VERDICT_RECORD.flagged_record_id` (points to the specific record that caused a Fail). Added `INGREDIENT_RECORD.supersedes_record_id` (correction now supersedes one flagged record, not the whole ingredient set).
+- **v0.3.0:** Added verifiable engine-attestation fields, versioned reference snapshots, audit outcome fields, and production-record correction linkage.
 
 ## 1. Purpose
 
@@ -30,6 +31,7 @@ erDiagram
     VERDICT_RECORD }o--o| INGREDIENT_RECORD : "flags, if Fail"
     EXPORT_RECORD }o--|| VERDICT_RECORD : "requires Pass"
     INGREDIENT_RECORD }o--o| INGREDIENT_RECORD : "supersedes, if correction"
+    PRODUCTION_RECORD }o--o| PRODUCTION_RECORD : "supersedes, if correction"
     REFERENCE_ENTRY ||--o{ REFERENCE_ENTRY : supersedes
     IDENTITY ||--o{ INGREDIENT_RECORD : submits
     IDENTITY ||--o{ PRODUCTION_RECORD : submits
@@ -63,7 +65,11 @@ erDiagram
         string batch_id FK
         string upload_session_id FK
         string ingredient_name_snapshot "denormalized, not live FK"
+        string ingredient_reference_entry_id
+        string ingredient_reference_version
         string source_snapshot "denormalized, not live FK"
+        string supplier_reference_entry_id
+        string supplier_reference_version
         boolean halal_risk_flag
         string override_reason "nullable, required only if flag overridden"
         string supersedes_record_id FK "NEW: nullable, set only when this record corrects a prior flagged record"
@@ -77,6 +83,9 @@ erDiagram
         datetime batch_date "system-populated, not editable"
         boolean line_segregation_confirmed
         string standard_snapshot "denormalized, e.g. CPKB / BPOM Reg 33/2021"
+        string standard_reference_entry_id
+        string standard_reference_version
+        string supersedes_record_id FK "nullable, set only when correcting a prior flagged production record"
         datetime timestamp
         string submitted_by FK
     }
@@ -86,8 +95,15 @@ erDiagram
         string batch_id FK
         string status "enum: pass | fail"
         string regulation_snapshot "denormalized, e.g. PP 42/2024"
+        string regulation_reference_entry_id
+        string regulation_reference_version
         string fail_reason_snapshot "nullable, from Fail Reason catalog, denormalized"
+        string fail_reason_reference_entry_id
+        string fail_reason_reference_version
         string flagged_record_id FK "NEW: nullable, points to the specific INGREDIENT_RECORD (or PRODUCTION_RECORD) that caused a Fail"
+        string engine_attestation_digest
+        string engine_version
+        string rules_release
         json recognition_check "nullable: issuing_body, requiring_body, recognized, as_of_date - evaluated using BATCH.intended_market"
         datetime timestamp
         string submitted_by FK
@@ -105,6 +121,7 @@ erDiagram
         string entry_id PK
         string type "enum: ingredient | supplier | standard | fail_reason"
         string value
+        string version
         string status "enum: active | deprecated"
         string superseded_by FK "nullable, self-referencing"
         json metadata "type-specific, e.g. default_halal_risk for ingredient type"
@@ -114,7 +131,8 @@ erDiagram
 
     AUDIT_LOG_ENTRY {
         string entry_id PK
-        string action "enum, matches Event Model list"
+        string event_type "enum, matches Event Model list"
+        string outcome "enum: allowed | denied | attempted"
         string module
         datetime timestamp
         string actor FK
@@ -140,13 +158,13 @@ Represents any of the 6 roles' real Fabric identities. `role` is a fixed enum of
 Exists purely to group ingredient records visually — no independent business meaning beyond that grouping.
 
 ### `INGREDIENT_RECORD`
-`ingredient_name_snapshot` and `source_snapshot` are the literal resolved text from the Reference Lists at submission time — not foreign keys. `override_reason` is nullable, populated only when the Halal Risk Flag is manually overridden. **`supersedes_record_id` is new**: when a correction is submitted, it's set to the ID of the specific ingredient record being corrected — the correction replaces only that one record's standing, not the whole batch's ingredient set. All other ingredient records in the batch are untouched and never resubmitted.
+`ingredient_name_snapshot` and `source_snapshot` are the literal resolved text plus version from the Reference Lists at submission time — not live foreign keys. `override_reason` is nullable, populated only when the Halal Risk Flag is manually overridden. `supersedes_record_id` is set only for a correction of the specific flagged ingredient record. All other ingredient records are untouched and never resubmitted.
 
 ### `PRODUCTION_RECORD`
-`batch_date` is explicitly system-populated — this field closes the backdating risk named as a real governance weakness in the underlying research this project is based on.
+`batch_date` is explicitly system-populated. `supersedes_record_id` follows the same append-only correction rule as ingredient records when a Fail flags production.
 
 ### `VERDICT_RECORD`
-`recognition_check` is stored as a JSON blob — a small, fixed-shape structure evaluated using `BATCH.intended_market`, not a value entered separately at export time. **`flagged_record_id` is new**: when `status = fail`, this points to the specific `INGREDIENT_RECORD` (or, where applicable, `PRODUCTION_RECORD`) that caused the failure — the Fail is now traceable to a specific prior fact, not just a textual reason. `status` remains a strict two-value enum, reflecting the binding, non-discretionary verdict rule.
+`recognition_check` is stored as a JSON blob evaluated using `BATCH.intended_market`. When `status = fail`, `flagged_record_id` points to the specific ingredient or production record that caused the failure. `engine_attestation_digest`, `engine_version`, and `rules_release` make the binding engine result verifiable and historically attributable. `status` remains a strict two-value enum.
 
 ### `EXPORT_RECORD`
 `destination_market` is now a denormalized copy of `BATCH.intended_market`, captured for the export record's own historical snapshot — it is no longer a value chosen at export time; the Export Request Form displays it read-only.
@@ -155,7 +173,7 @@ Exists purely to group ingredient records visually — no independent business m
 The one entity with a genuine self-referencing relationship (`superseded_by`) — makes the supersede-never-delete pattern queryable.
 
 ### `AUDIT_LOG_ENTRY`
-`action` is a closed enum, matching the Event Model list in the Architecture document exactly, not free text.
+`event_type` and `outcome` are closed database-enforced enums, matching the Event Model in the Architecture document; neither is free text.
 
 ### `FILE_OBJECT`
 Not a full entity in the traditional sense — more a lookup convention than a table with independent lifecycle.
@@ -164,7 +182,7 @@ Not a full entity in the traditional sense — more a lookup convention than a t
 
 - One `BATCH` has zero-or-one of each child record type at any given point in its lifecycle, but potentially many over time through corrections — the `||--o{` notation reflects the cumulative relationship across the batch's full history.
 - `VERDICT_RECORD` to `INGREDIENT_RECORD` (via `flagged_record_id`) is optional (zero-or-one) — only populated for Fail verdicts.
-- `INGREDIENT_RECORD` to itself (via `supersedes_record_id`) is optional (zero-or-one) — only populated for correction submissions.
+- `INGREDIENT_RECORD` and `PRODUCTION_RECORD` each self-reference through `supersedes_record_id` only for correction submissions. Superseded status is derived from the linked successor; prior ledger records are never updated.
 - `IDENTITY` to every record type is one-to-many — one identity submits many records over time.
 - `REFERENCE_ENTRY` to itself is the only other reflexive relationship in the model, capturing version history without a separate history table.
 
@@ -173,4 +191,4 @@ Not a full entity in the traditional sense — more a lookup convention than a t
 - No `USER_SESSION` entity — session state lives entirely in the JWT itself.
 - No `NOTIFICATION` entity — the "N batches awaiting your action" indicator is computed on read from existing Batch List filtering logic.
 - No separate `HASH_LOG` or blockchain-internal structures — those are Fabric's own internal ledger mechanics.
-- No production-record correction linkage yet (`supersedes_record_id` currently exists only on `INGREDIENT_RECORD`) — logged as an Open Item in the Risk Register, not built into this version.
+- No correction record type beyond ingredients and production is modeled; a Fail must identify one of those concrete upstream record types.

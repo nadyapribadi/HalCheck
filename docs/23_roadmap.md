@@ -20,7 +20,7 @@
 
 Status: complete.
 
-Deliverables: full 24-document set (Charter, BRD, PRD, FRD, TRD, Architecture, ERD, Security Threat Model, Test Strategy, UI Specification, UI Flow & Navigation, Screen Requirements, Seed Data Specification, Implementation Plan, Developer Setup, Config Reference, Risk Register, API Reference, Vibe-Coding Guardrails, Repository Structure Guide, Glossary, Decision Log, Requirements Traceability Matrix, Roadmap), plus eight independent expert review passes with every finding closed or explicitly accepted.
+Deliverables: full 24-document set (Charter, BRD, PRD, FRD, TRD, Architecture, ERD, Security Threat Model, Test Strategy, UI Specification, UI Flow & Navigation, Screen Requirements, Seed Data Specification, Implementation Plan, Developer Setup, Config Reference, Risk Register, API Reference, Vibe-Coding Guardrails, Repository Structure Guide, Glossary, Decision Log, Requirements Traceability Matrix, Roadmap), plus eight independent expert review passes with every finding closed or explicitly accepted. The pre-build authority closure lives in TRD §23 and hygiene acceptance in Repository Structure Guide §11.
 
 Exit criteria: Build can begin against a fully specified, internally consistent, reviewed design — met.
 

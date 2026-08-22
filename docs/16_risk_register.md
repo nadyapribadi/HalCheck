@@ -10,7 +10,7 @@
 
 ## Changelog
 
-- **v0.2.0:** Added R-018 for the intentionally unresolved production-record correction linkage gap.
+- **v0.3.0:** Closed R-018 through the pre-build authority closure: production corrections now use the same append-only linkage as ingredient corrections.
 
 ## Risk Summary
 
@@ -37,7 +37,7 @@ This feature carries a different risk profile than a typical UI addition: it mak
 | R-015 | Documentation drifts from actual implementation as Build proceeds | Medium | Medium | Requirements Traceability Matrix maintained as a living reference, not a one-time artifact | Product |
 | R-016 | Solo-developer bandwidth/continuity — the entire project depends on one person's availability, understanding, and context; no bus-factor redundancy exists | High | Medium | The documentation suite itself is the primary mitigation — its thoroughness (23 requirements, full traceability, ADR log, 8 independent review passes) exists specifically to lower this risk | Solo developer |
 | R-017 | Cumulative scope growth without a corresponding re-baseline — each individual addition was well-reasoned in isolation, but the aggregate materially changed what "V1" means from its original static-mocked-demo definition | Medium | Realized (already occurred once) | Addressed retroactively via the eight-review process and Implementation Plan re-baseline; any new scope addition requires an explicit ADR and a check against whether it triggers another re-baseline | Solo developer |
-| R-018 | Fail verdicts may flag production records, but v0.2 only models correction linkage for ingredient records | Medium | Medium | Treat as an explicit open item before implementing production-failure correction paths; do not silently reuse ingredient correction logic for production records | Product/Chaincode |
+| R-018 | Production correction linkage was previously absent while Fail verdicts could flag production records | Medium | Closed | Resolved by DCG-005: production records now carry append-only `supersedes_record_id`, with dedicated negative tests | Product/Chaincode |
 
 ## Top Risks to Address Before Build Starts
 
@@ -45,7 +45,7 @@ This feature carries a different risk profile than a typical UI addition: it mak
 2. R-008 — vibe-coding review discipline for chaincode/identity specifically.
 3. R-009 — scope creep guardrail (ADR-required for any addition).
 4. R-017 — explicit acknowledgment that the re-baselined Implementation Plan is the actual reference going forward, not the original 5-sprint version.
-5. R-018 — decide whether production-record correction linkage is in scope before implementing Fail reasons tied to production records.
+5. R-018 — resolved by DCG-005; implement and test the agreed production-correction model before enabling it.
 
 ## Top Risks to Address Before Any Public Demo Link Is Shared
 

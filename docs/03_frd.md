@@ -11,6 +11,7 @@
 ## Changelog
 
 - **v0.2.0:** Added Section 2a (Batch Creation) with FRD-CHAIN-BATCH-001, resolving the destination/verdict sequencing gap. Added FRD-CHAIN-VERDICT-007 (Fail verdicts must reference the specific flagged record). Added FRD-CHAIN-LEDGER-005 (corrections supersede only the flagged record, not the whole ingredient set).
+- **v0.3.0:** Made controlled-value and verdict authority chaincode-verifiable; defined fail-closed audit delivery and the canonical RBAC matrix reference.
 
 ## 1. Scope
 
@@ -77,7 +78,7 @@ Defines functional requirements for the Compliance Trail feature, covering batch
 | FRD-CHAIN-UPLOAD-006 | Ingredient Name and Source fields must be selected from the current Ingredient/Supplier Reference Lists, not freely typed. | PRD-CT-013 | P0 |
 | FRD-CHAIN-UPLOAD-007 | A bulk upload row whose ingredient or supplier value does not match the reference list must be rejected at that row, with a specific "not a recognized value" error, not treated as valid free text. | PRD-CT-013 | P0 |
 | FRD-CHAIN-UPLOAD-008 | Halal Risk Flag must auto-populate from the matched Ingredient Reference List entry's default classification; the submitting role may override only with an explicit, recorded reason. | PRD-CT-013 | P1 |
-| FRD-CHAIN-UPLOAD-009 | Backend must validate Ingredient Name and Source values against the current Reference Lists on every submission path (manual entry, bulk upload, and direct API call), independent of whether the request originated from the reference-list UI component. A value not present in the reference list must be rejected with `reason: "not_a_recognized_value"`, regardless of how the request was constructed. | PRD-CT-013 | P0 |
+| FRD-CHAIN-UPLOAD-009 | `batch` chaincode must validate Ingredient Name and Source through the on-ledger `refdata.ResolveActiveReference` contract on every submission path. Backend validation is permitted only as UX pre-validation. A value not present in the current reference list must be rejected with `reason: "not_a_recognized_value"`, regardless of how the request was constructed. | PRD-CT-013 | P0 |
 
 ## 7. Production Confirmation
 
@@ -103,7 +104,7 @@ Defines functional requirements for the Compliance Trail feature, covering batch
 | FRD-CHAIN-VERDICT-002 | Recognition-directionality outcome must be recorded as part of the verdict record. | PRD-CT-009 | P1 |
 | FRD-CHAIN-VERDICT-003 | Recognition-directionality outcome must be visibly and explicitly labeled in the verdict detail view, not folded into generic metadata. | PRD-CT-009 | P1 |
 | FRD-CHAIN-VERDICT-004 | A Fail verdict's reason must be selected from the controlled Fail Reason catalog, not freely typed. | PRD-CT-015 | P1 |
-| FRD-CHAIN-VERDICT-005 | The compliance engine's Pass/Fail output is binding. The Compliance Officer role has no override capability — the verdict record submitted to the ledger must exactly match the engine's determination, with no discretionary field permitting a different outcome to be recorded. | PRD-CT-005 | P0 |
+| FRD-CHAIN-VERDICT-005 | The compliance engine's Pass/Fail output is binding. `batch` chaincode must verify a signed, versioned engine attestation bound to the batch, effective-input digest, intended market, engine/rules release, result, and Fail details before recording a verdict. The Compliance Officer has no override capability. | PRD-CT-005 | P0 |
 | FRD-CHAIN-VERDICT-006 | Because the verdict is engine-determined and non-discretionary (per FRD-CHAIN-VERDICT-005), no second-party review/counter-signature is required on the verdict-recording action — the check in this step is the deterministic engine output itself, not a second human. | PRD-CT-005 | P1 |
 | FRD-CHAIN-VERDICT-007 | A Fail verdict must record the specific ingredient (or production) record ID that triggered the failure, not just a textual reason. | PRD-CT-005, PRD-CT-006 | P0 |
 
@@ -148,17 +149,17 @@ Defines functional requirements for the Compliance Trail feature, covering batch
 
 | ID | Requirement | Traces to | Priority |
 |---|---|---|---|
-| FRD-CHAIN-AUDIT-001 | All logins, views, and failed access attempts must be recorded in a centralized System Audit Log, separate from the business-event ledger. | PRD-CT-020 | P0 |
+| FRD-CHAIN-AUDIT-001 | All logins, views, denied access attempts, and state-changing attempts must be recorded in a centralized System Audit Log before the protected response or ledger submission is issued; audit-store failure must deny the covered request with `reason: "audit_unavailable"`. | PRD-CT-020 | P0 |
 | FRD-CHAIN-AUDIT-002 | The System Audit Log must be insert-only; no update or delete operation may exist for audit log entries at the database permission level. | PRD-CT-021 | P0 |
 | FRD-CHAIN-AUDIT-003 | The System Audit Log must be accessible only to the System Admin role; no operational role may view it. | PRD-CT-022 | P0 |
-| FRD-CHAIN-AUDIT-004 | Each audit log entry must capture identity, action, module/screen, and timestamp at minimum. | PRD-CT-020 | P1 |
+| FRD-CHAIN-AUDIT-004 | Each audit log entry must capture event type, outcome, identity or privacy-safe subject hint, module/route, and timestamp at minimum; IP/device is captured where available. | PRD-CT-020 | P1 |
 
 ## 15. Field-Level Access Control
 
 | ID | Requirement | Traces to | Priority |
 |---|---|---|---|
 | FRD-CHAIN-RBAC-001 | API responses must omit any field a given role is not authorized to view, enforced server-side, regardless of what the frontend chooses to render. | PRD-CT-023 | P0 |
-| FRD-CHAIN-RBAC-002 | A Role × Field × Access (Hidden/Read/Write) matrix must be defined and enforced for every data type exposed by the system. | PRD-CT-023 | P0 |
+| FRD-CHAIN-RBAC-002 | The canonical Role × Field × Access matrix in TRD §23.4 must be enforced for every data type exposed by the system. | PRD-CT-023 | P0 |
 | FRD-CHAIN-RBAC-003 | Field-level access violations (a role attempting to read or write a restricted field) must be logged to the System Audit Log. | PRD-CT-020, PRD-CT-023 | P1 |
 
 ## 16. AI Trail Explanation

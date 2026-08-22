@@ -11,6 +11,7 @@
 ## Changelog
 
 - **v0.2.0:** Added tests for immutable Intended Market, flagged-record Fail verdicts, single-record correction, and Integrity Sandbox controlled-vocabulary bypass demonstration.
+- **v0.3.0:** Added chaincode-level controlled-value, reference-data interaction, verdict-attestation, and audit-availability tests.
 
 ## 1. Testing Philosophy
 
@@ -74,8 +75,11 @@ A test that only confirms the allowed path works proves nothing about whether th
 | Reference data versioning | Create batch referencing version A of a standard; deprecate and replace with version B; confirm original batch still shows version A |
 | Audit log tamper resistance | Attempt UPDATE/DELETE against the audit log table directly at the database level; confirm rejection by grant, not application logic |
 | Audit log access boundary | Each of the 5 operational roles attempts to access audit log routes; all rejected |
+| Audit availability gate | Simulate audit-store failure on login, view, denied route, and ledger submission; confirm HTTP 503 `audit_unavailable`, no protected response, and no ledger write |
 | Field-level access | For each role, inspect actual API response payload for a record containing fields that role shouldn't see; confirm absence, not just visual hiding |
-| Controlled vocabulary bypass | Construct a direct API request bypassing the frontend select component; confirm rejection with `reason: "not_a_recognized_value"` at the backend, for both manual and bulk-upload paths |
+| Controlled vocabulary bypass | Construct a direct API request bypassing the frontend select component; confirm `batch` chaincode rejects it with `reason: "not_a_recognized_value"`, for both manual and bulk-upload paths |
+| Reference-data interaction | Submit a controlled value while its reference entry is concurrently deprecated/replaced; confirm a consistent snapshot or MVCC conflict, never a mixed state |
+| Verdict attestation | Alter each binding field of a signed attestation (result, batch, inputs, market, rule release, Fail details); confirm `batch` rejects every variant |
 | Integrity Sandbox controlled vocabulary mode | Sandbox attempt to submit an unlisted ingredient/supplier returns `not_a_recognized_value` without writing real data |
 | Concurrency conflict handling | Submit two genuinely simultaneous requests against the same batch; confirm exactly one succeeds, the other receives `concurrent_modification`, and ledger state reflects only the successful one |
 | Fail-correction routing | After a Fail verdict, confirm the batch's computed status becomes "Awaiting Correction" and appears in Ingredient QA's filtered Batch List |
