@@ -2,14 +2,12 @@
 
 HALCHECK is a halal supply chain compliance screening project for cosmetics. Its core screening app compares BPJPH and JAKIM rules, checks a fictional supply chain against those standards, and produces sourced, step-level gap findings.
 
-The project is currently in planning/specification. The core screening app remains a static React 19 + TypeScript build with versioned JSON data, local browser storage, and a pure rules engine.
-
 ## Project Scope
 
 HALCHECK is organized as one product with two bounded parts:
 
-- **Core Screening App** — browser-only screening workflow, no login, backend, or server database in v1.
-- **Compliance Trail** — planned accountability module that adds role-based, tamper-evident batch records through a real local Hyperledger Fabric/backend stack. Build has not started.
+- **Core Screening App** — browser-only screening workflow, no login, backend, or server database in v1. Engine, local storage, and all 5 UI screens are implemented, unit-tested (15/15 passing), and manually verified against the three canonical SL-2026-00x scenarios.
+- **Compliance Trail** — accountability module that adds role-based, tamper-evident batch records through a real local Hyperledger Fabric/backend stack. Foundation phases (P0–P1.5) complete; chaincode core rules (P2) in progress.
 
 ## Documentation
 
@@ -44,15 +42,27 @@ The numbered planning suite lives in [`docs/`](docs/):
 
 Six of these documents (00, 01, 03, 06, 09, 12) cover both modules in one file: the Compliance Trail content as originally written, plus a later section specifying the Core Screening App — the actual BPJPH/JAKIM rules engine Compliance Trail wraps, which previously had no design documentation of its own.
 
+## Compliance Trail Progress
+
+| Phase | Name | Status |
+| --- | --- | --- |
+| P0 | Foundation + Ops Hygiene | Done |
+| P1 | Identity Setup (6 roles) | Done |
+| P1.5 | Chaincode Design Gate | Done |
+| P2 | Chaincode Core Rules | In progress |
+| P3–P11 | Backend, Frontend, AI, Hardening | Not started |
+
 ## Repository Structure
 
 ```text
 halcheck/
-|-- src/          # core screening app, features, engine, storage, config
+|-- src/          # core screening app — engine, storage, config, features, app
 |-- dataset/      # briefs, drafts, verified data, frozen releases
-|-- docs/         # planning and specification suite
+|-- docs/         # planning and specification suite (24 docs)
 |-- public/       # static assets
-|-- chaincode/    # planned Compliance Trail Fabric chaincode
+|-- chaincode/
+|   |-- batch/    # batch lifecycle chaincode (in progress)
+|   `-- refdata/  # reference data chaincode (add/deprecate, in progress)
 |-- backend/      # planned Compliance Trail API
 |-- frontend/     # planned Compliance Trail UI shell, if separated from src
 |-- network/      # planned local Fabric network config
@@ -61,8 +71,9 @@ halcheck/
 
 ## Runtime Principles
 
-- HALCHECK Core has no login, backend, or server database in v1.
-- Compliance Trail infrastructure is planned but not yet run.
+- HALCHECK Core Screening App has no login, backend, or server database in v1.
+- Compliance Trail runs on a local Hyperledger Fabric test network (2-org, Raft orderer, 3 CAs). Network and 6 role identities are proven working.
+- Chaincode modules (`batch`, `refdata`) are independently deployable on the same channel. Reference-data chaincode supports add/deprecate with no update/delete; batch chaincode is scaffolded.
 - No AI call in the verdict path.
 - Dataset releases are frozen and versioned.
 - Screening runs store the dataset version and engine version used.
