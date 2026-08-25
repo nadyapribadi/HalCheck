@@ -217,7 +217,7 @@ Screening App sections, never touched existing Compliance Trail content;
   everywhere a write-back happens; two regression tests added
   (`TestDeprecateReferenceEntry_SucceedsAgainstLegacyKeyFormat`,
   `TestAddReferenceEntry_NewVersionAfterDeprecatingLegacyEntrySucceeds`).
-  29 `refdata` tests total. Deployed live as v1.4 (sequence 5) after v1.2
+  28 `refdata` tests total. Deployed live as v1.4 (sequence 5) after v1.2
   and v1.3 both hit an infra-only "chaincode image never built" incident
   isolated to Org1's peer (Org2 built and ran the identical package fine
   throughout) — resolved by a second peer restart, no Docker Desktop

@@ -495,7 +495,7 @@ func (c *RefdataContract) GetReferenceEntryHistory(
 // ListReferenceEntries returns every entry of a given type -- active and
 // deprecated together, deprecated ones always included, never filtered
 // out. This is what actually powers the Reference Data List screen
-// (docs/12_seed_data_specification.md §12), as distinct from
+// (docs/11_screen_requirements.md §12), as distinct from
 // GetReferenceEntryHistory (one entry's full version history):
 // FRD-CHAIN-REFDATA-004 needs both -- this for browsing every entry of a
 // type, that for audit-grade proof that nothing was silently altered.

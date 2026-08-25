@@ -153,9 +153,9 @@ sequenceDiagram
   participant CC as Chaincode (refdata)
   participant L as Ledger
 
-  Admin->>CC: Deprecate ingredient X, add ingredient Y
+  Admin->>CC: Deprecate ingredient X's current version, add X's next version
   CC->>CC: Verify caller identity = System Admin
-  CC->>L: Write new version, mark X deprecated (not deleted)
+  CC->>L: Write new version of X, mark prior version deprecated (not deleted)
   L-->>Admin: Confirmed
 
   Note over L: Existing batch records referencing X's<br/>prior version remain unchanged (snapshot-based)
