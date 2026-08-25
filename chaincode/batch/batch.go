@@ -6,8 +6,15 @@
 package main
 
 import (
+	"crypto/ecdsa"
+	"crypto/sha256"
+	"crypto/x509"
+	"encoding/base64"
+	"encoding/hex"
 	"encoding/json"
+	"encoding/pem"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/hyperledger/fabric-chaincode-go/v2/pkg/cid"
@@ -69,6 +76,28 @@ func batchKey(ctx contractapi.TransactionContextInterface, batchID string) (stri
 
 func batchCounterKey(ctx contractapi.TransactionContextInterface, year int) (string, error) {
 	return ctx.GetStub().CreateCompositeKey("batchCounter", []string{fmt.Sprintf("%d", year)})
+}
+
+// requireBatchExists reads back a batch's own record, rejecting with the
+// same batch_not_found error every batch-scoped function in this module
+// already uses when a caller's batch_id doesn't exist on the ledger.
+func requireBatchExists(ctx contractapi.TransactionContextInterface, batchID string) (*Batch, error) {
+	bKey, err := batchKey(ctx, batchID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to build batch key: %w", err)
+	}
+	batchBytes, err := ctx.GetStub().GetState(bKey)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read world state: %w", err)
+	}
+	if batchBytes == nil {
+		return nil, fmt.Errorf("batch_not_found: batch %q does not exist", batchID)
+	}
+	var batch Batch
+	if err := json.Unmarshal(batchBytes, &batch); err != nil {
+		return nil, fmt.Errorf("failed to unmarshal batch: %w", err)
+	}
+	return &batch, nil
 }
 
 // CreateBatch starts a new batch, capturing Intended Market immutably at
@@ -165,11 +194,11 @@ func (c *BatchContract) nextBatchID(ctx contractapi.TransactionContextInterface,
 	return fmt.Sprintf("SL-%d-%03d", year, next), nil
 }
 
-// IngredientRecord mirrors docs/06_erd.md's INGREDIENT_RECORD. This first
-// version covers plain submission only -- correction mode
-// (supersedes_record_id actually set, per FRD-CHAIN-LEDGER-005/TRD §23.5's
-// distinct role/state rules) is deliberately a separate follow-up function,
-// not conflated into this one.
+// IngredientRecord mirrors docs/06_erd.md's INGREDIENT_RECORD.
+// SupersedesRecordID is empty for a plain SubmitIngredient call and set to
+// the flagged record's ID for a CorrectIngredient call below -- the two
+// functions share field-resolution logic (recordIngredient) but enforce
+// different role/state preconditions per FRD-CHAIN-LEDGER-005/TRD §23.5.
 // Note on the metadata struct tags below: contractapi generates its own
 // JSON schema from these tags for response validation, and it is NOT
 // driven by the json tag's `omitempty` -- a field is schema-required
@@ -269,18 +298,72 @@ func (c *BatchContract) SubmitIngredient(
 		return nil, err
 	}
 
-	bKey, err := batchKey(ctx, batchID)
-	if err != nil {
-		return nil, fmt.Errorf("failed to build batch key: %w", err)
-	}
-	batchBytes, err := ctx.GetStub().GetState(bKey)
-	if err != nil {
-		return nil, fmt.Errorf("failed to read world state: %w", err)
-	}
-	if batchBytes == nil {
-		return nil, fmt.Errorf("batch_not_found: batch %q does not exist", batchID)
+	if _, err := requireBatchExists(ctx, batchID); err != nil {
+		return nil, err
 	}
 
+	return c.recordIngredient(ctx, batchID, ingredientName, source, isOverride, overrideHalalRisk, overrideReason, "")
+}
+
+// CorrectIngredient submits a correction for the single ingredient record
+// currently flagged by the batch's own recorded verdict
+// (FRD-CHAIN-LEDGER-002/005, TRD §23.5: "Only the owner role may correct
+// that exact, unsuperseded flagged record ... while the latest effective
+// verdict is Fail"). There is deliberately no parameter identifying which
+// record to correct -- currentFlaggedRecord derives it from the batch's own
+// latest verdict, the same way Screen Requirements §6 describes the
+// correction screen working, so a caller cannot correct the wrong record
+// even by mistake. The original flagged record is never touched; this
+// writes a brand-new record with SupersedesRecordID set, leaving every
+// other ingredient record on the batch exactly as it was.
+func (c *BatchContract) CorrectIngredient(
+	ctx contractapi.TransactionContextInterface,
+	batchID string,
+	ingredientName string,
+	source string,
+	isOverride bool,
+	overrideHalalRisk bool,
+	overrideReason string,
+) (*IngredientRecord, error) {
+	if err := requireRole(ctx, "ingredient_qa"); err != nil {
+		return nil, err
+	}
+
+	if _, err := requireBatchExists(ctx, batchID); err != nil {
+		return nil, err
+	}
+
+	flaggedRecordID, err := c.currentFlaggedRecord(ctx, batchID, "ingredientRecord")
+	if err != nil {
+		return nil, err
+	}
+
+	alreadyCorrected, err := c.isSuperseded(ctx, "ingredientRecord", batchID, flaggedRecordID)
+	if err != nil {
+		return nil, err
+	}
+	if alreadyCorrected {
+		return nil, fmt.Errorf("duplicate_entry: the flagged ingredient record has already been corrected")
+	}
+
+	return c.recordIngredient(ctx, batchID, ingredientName, source, isOverride, overrideHalalRisk, overrideReason, flaggedRecordID)
+}
+
+// recordIngredient resolves references and writes the record shared by
+// SubmitIngredient (supersedesRecordID == "") and CorrectIngredient
+// (supersedesRecordID == the flagged record's ID) -- both submit the exact
+// same field shape; only the role/state preconditions checked by their
+// respective callers above differ.
+func (c *BatchContract) recordIngredient(
+	ctx contractapi.TransactionContextInterface,
+	batchID string,
+	ingredientName string,
+	source string,
+	isOverride bool,
+	overrideHalalRisk bool,
+	overrideReason string,
+	supersedesRecordID string,
+) (*IngredientRecord, error) {
 	ingredientRef, err := c.resolveReference(ctx, "ingredient", ingredientName)
 	if err != nil {
 		return nil, err
@@ -328,6 +411,7 @@ func (c *BatchContract) SubmitIngredient(
 		SupplierReferenceVersion:   supplierRef.Version,
 		HalalRiskFlag:              halalRiskFlag,
 		OverrideReason:             recordedOverrideReason,
+		SupersedesRecordID:         supersedesRecordID,
 		Timestamp:                  time.Unix(txTimestamp.GetSeconds(), int64(txTimestamp.GetNanos())).UTC().Format(time.RFC3339),
 		SubmittedBy:                submittedBy,
 	}
@@ -349,22 +433,21 @@ func (c *BatchContract) SubmitIngredient(
 	return &record, nil
 }
 
-// ProductionRecord mirrors docs/06_erd.md's PRODUCTION_RECORD. This first
-// version covers plain confirmation only -- correction mode
-// (supersedes_record_id actually set, per TRD §23.5) is deliberately a
-// separate follow-up function, matching how correction mode was scoped out
-// of SubmitIngredient above.
+// ProductionRecord mirrors docs/06_erd.md's PRODUCTION_RECORD.
+// SupersedesRecordID is empty for a plain ConfirmProduction call and set to
+// the flagged record's ID for a CorrectProduction call below, matching how
+// IngredientRecord's SupersedesRecordID works (TRD §23.5).
 type ProductionRecord struct {
-	RecordID                  string `json:"record_id" metadata:"record_id"`
-	BatchID                   string `json:"batch_id" metadata:"batch_id"`
-	BatchDate                 string `json:"batch_date" metadata:"batch_date"`
-	LineSegregationConfirmed  bool   `json:"line_segregation_confirmed" metadata:"line_segregation_confirmed"`
-	StandardSnapshot          string `json:"standard_snapshot" metadata:"standard_snapshot"`
-	StandardReferenceEntryID  string `json:"standard_reference_entry_id" metadata:"standard_reference_entry_id"`
-	StandardReferenceVersion  string `json:"standard_reference_version" metadata:"standard_reference_version"`
-	SupersedesRecordID        string `json:"supersedes_record_id,omitempty" metadata:"supersedes_record_id,optional"`
-	Timestamp                 string `json:"timestamp" metadata:"timestamp"`
-	SubmittedBy               string `json:"submitted_by" metadata:"submitted_by"`
+	RecordID                 string `json:"record_id" metadata:"record_id"`
+	BatchID                  string `json:"batch_id" metadata:"batch_id"`
+	BatchDate                string `json:"batch_date" metadata:"batch_date"`
+	LineSegregationConfirmed bool   `json:"line_segregation_confirmed" metadata:"line_segregation_confirmed"`
+	StandardSnapshot         string `json:"standard_snapshot" metadata:"standard_snapshot"`
+	StandardReferenceEntryID string `json:"standard_reference_entry_id" metadata:"standard_reference_entry_id"`
+	StandardReferenceVersion string `json:"standard_reference_version" metadata:"standard_reference_version"`
+	SupersedesRecordID       string `json:"supersedes_record_id,omitempty" metadata:"supersedes_record_id,optional"`
+	Timestamp                string `json:"timestamp" metadata:"timestamp"`
+	SubmittedBy              string `json:"submitted_by" metadata:"submitted_by"`
 }
 
 // productionStandardValue is the one manufacturing standard production
@@ -394,9 +477,7 @@ func (c *BatchContract) hasAnyRecord(ctx contractapi.TransactionContextInterface
 // Requires a prior ingredient record for the same batch
 // (FRD-CHAIN-SEQUENCE-001) and rejects a second plain confirmation once one
 // already exists -- a further confirmation is only ever valid as an
-// explicit correction (a separate, deliberately deferred follow-up
-// function, matching how correction mode is scoped out of SubmitIngredient
-// above).
+// explicit correction via CorrectProduction below.
 //
 // BatchDate is never accepted as a parameter -- it is always the
 // transaction timestamp (FRD-CHAIN-PROD-002: "system-populated ... not
@@ -412,16 +493,8 @@ func (c *BatchContract) ConfirmProduction(
 		return nil, err
 	}
 
-	bKey, err := batchKey(ctx, batchID)
-	if err != nil {
-		return nil, fmt.Errorf("failed to build batch key: %w", err)
-	}
-	batchBytes, err := ctx.GetStub().GetState(bKey)
-	if err != nil {
-		return nil, fmt.Errorf("failed to read world state: %w", err)
-	}
-	if batchBytes == nil {
-		return nil, fmt.Errorf("batch_not_found: batch %q does not exist", batchID)
+	if _, err := requireBatchExists(ctx, batchID); err != nil {
+		return nil, err
 	}
 
 	hasIngredient, err := c.hasAnyRecord(ctx, "ingredientRecord", batchID)
@@ -440,6 +513,52 @@ func (c *BatchContract) ConfirmProduction(
 		return nil, fmt.Errorf("duplicate_entry: batch %q already has a production record; submit a correction instead", batchID)
 	}
 
+	return c.recordProduction(ctx, batchID, lineSegregationConfirmed, "")
+}
+
+// CorrectProduction submits a correction for the single production record
+// currently flagged by the batch's own recorded verdict, matching
+// CorrectIngredient's design exactly (TRD §23.5). Production QA only -- the
+// owner role for production records, not whoever happens to be fixing the
+// batch generally.
+func (c *BatchContract) CorrectProduction(
+	ctx contractapi.TransactionContextInterface,
+	batchID string,
+	lineSegregationConfirmed bool,
+) (*ProductionRecord, error) {
+	if err := requireRole(ctx, "production_qa"); err != nil {
+		return nil, err
+	}
+
+	if _, err := requireBatchExists(ctx, batchID); err != nil {
+		return nil, err
+	}
+
+	flaggedRecordID, err := c.currentFlaggedRecord(ctx, batchID, "productionRecord")
+	if err != nil {
+		return nil, err
+	}
+
+	alreadyCorrected, err := c.isSuperseded(ctx, "productionRecord", batchID, flaggedRecordID)
+	if err != nil {
+		return nil, err
+	}
+	if alreadyCorrected {
+		return nil, fmt.Errorf("duplicate_entry: the flagged production record has already been corrected")
+	}
+
+	return c.recordProduction(ctx, batchID, lineSegregationConfirmed, flaggedRecordID)
+}
+
+// recordProduction resolves the governing standard and writes the record
+// shared by ConfirmProduction (supersedesRecordID == "") and
+// CorrectProduction (supersedesRecordID == the flagged record's ID).
+func (c *BatchContract) recordProduction(
+	ctx contractapi.TransactionContextInterface,
+	batchID string,
+	lineSegregationConfirmed bool,
+	supersedesRecordID string,
+) (*ProductionRecord, error) {
 	standardRef, err := c.resolveReference(ctx, "standard", productionStandardValue)
 	if err != nil {
 		return nil, err
@@ -464,6 +583,7 @@ func (c *BatchContract) ConfirmProduction(
 		StandardSnapshot:         standardRef.Value,
 		StandardReferenceEntryID: standardRef.EntryID,
 		StandardReferenceVersion: standardRef.Version,
+		SupersedesRecordID:       supersedesRecordID,
 		Timestamp:                ts,
 		SubmittedBy:              submittedBy,
 	}
@@ -478,6 +598,535 @@ func (c *BatchContract) ConfirmProduction(
 		return nil, fmt.Errorf("failed to build production record key: %w", err)
 	}
 
+	if err := ctx.GetStub().PutState(key, recordJSON); err != nil {
+		return nil, fmt.Errorf("failed to write to world state: %w", err)
+	}
+
+	return &record, nil
+}
+
+// verdictAttestationPublicKeyPEM is committed with this chaincode
+// definition, not stored as mutable ledger state (TRD §23.2: "A
+// verification-key change requires a reviewed chaincode lifecycle
+// upgrade"). The matching private key lives outside this repository
+// entirely, under the same discipline as every other piece of generated
+// Fabric crypto material -- see docs/14_developer_setup.md §1.4. Until the
+// real backend (P4) exists to own signing, this keypair stands in for it.
+const verdictAttestationPublicKeyPEM = `-----BEGIN PUBLIC KEY-----
+MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEBVk3G7NxiwULT61noH5Q0d4GC1zG
+dYTHAv9hbPKBtmrwsOk+IQkHsKzFFt09D7AHMjsLy5lnhWtSs/efOZhc7g==
+-----END PUBLIC KEY-----`
+
+var verdictAttestationPublicKey = mustParseECDSAPublicKey(verdictAttestationPublicKeyPEM)
+
+func mustParseECDSAPublicKey(pemStr string) *ecdsa.PublicKey {
+	block, _ := pem.Decode([]byte(pemStr))
+	if block == nil {
+		panic("invalid verdict attestation public key PEM")
+	}
+	pub, err := x509.ParsePKIXPublicKey(block.Bytes)
+	if err != nil {
+		panic(fmt.Sprintf("invalid verdict attestation public key: %v", err))
+	}
+	ecdsaPub, ok := pub.(*ecdsa.PublicKey)
+	if !ok {
+		panic("verdict attestation public key is not ECDSA")
+	}
+	return ecdsaPub
+}
+
+// verifyAttestationSignature checks payload's SHA-256 digest against
+// signatureBase64 using the compiled-in public key. A package-level var
+// (not a literal call site) so tests can swap in a freshly-generated test
+// keypair for the duration of a single test, without ever touching the
+// real private key (which isn't in this repo at all).
+func verifyAttestationSignature(payload []byte, signatureBase64 string) error {
+	signature, err := base64.StdEncoding.DecodeString(signatureBase64)
+	if err != nil {
+		return fmt.Errorf("attestation_invalid: invalid signature encoding: %v", err)
+	}
+	digest := sha256.Sum256(payload)
+	if !ecdsa.VerifyASN1(verdictAttestationPublicKey, digest[:], signature) {
+		return fmt.Errorf("attestation_invalid: signature verification failed")
+	}
+	return nil
+}
+
+// VerdictAttestation is the signed payload the (future) backend obtains
+// from the compliance engine (TRD §23.2) and submits to RecordVerdict.
+// Every field here is what actually determines the verdict -- RecordVerdict
+// accepts no client-supplied verdict fields beyond this one signed blob.
+type VerdictAttestation struct {
+	BatchID          string            `json:"batch_id"`
+	InputDigest      string            `json:"input_digest"`
+	IntendedMarket   string            `json:"intended_market"`
+	EngineVersion    string            `json:"engine_version"`
+	RulesRelease     string            `json:"rules_release"`
+	Result           string            `json:"result"` // "pass" | "fail"
+	RegulationValue  string            `json:"regulation_value"`
+	FailReason       string            `json:"fail_reason,omitempty"`
+	FlaggedRecordID  string            `json:"flagged_record_id,omitempty"`
+	RecognitionCheck *RecognitionCheck `json:"recognition_check,omitempty"`
+}
+
+// RecognitionCheck mirrors docs/06_erd.md's VERDICT_RECORD.recognition_check
+// JSON blob, evaluated by the engine using BATCH.intended_market.
+type RecognitionCheck struct {
+	IssuingBody   string `json:"issuing_body" metadata:"issuing_body"`
+	RequiringBody string `json:"requiring_body" metadata:"requiring_body"`
+	Recognized    bool   `json:"recognized" metadata:"recognized"`
+	AsOfDate      string `json:"as_of_date" metadata:"as_of_date"`
+}
+
+// VerdictRecord mirrors docs/06_erd.md's VERDICT_RECORD. This first version
+// covers plain recording only -- there is no correction mode for verdicts
+// themselves (a Fail is corrected by correcting the flagged ingredient or
+// production record and recording a fresh verdict, not by editing this
+// record; see TRD §23.5).
+type VerdictRecord struct {
+	RecordID                   string            `json:"record_id" metadata:"record_id"`
+	BatchID                    string            `json:"batch_id" metadata:"batch_id"`
+	Status                     string            `json:"status" metadata:"status"`
+	RegulationSnapshot         string            `json:"regulation_snapshot" metadata:"regulation_snapshot"`
+	RegulationReferenceEntryID string            `json:"regulation_reference_entry_id" metadata:"regulation_reference_entry_id"`
+	RegulationReferenceVersion string            `json:"regulation_reference_version" metadata:"regulation_reference_version"`
+	FailReasonSnapshot         string            `json:"fail_reason_snapshot,omitempty" metadata:"fail_reason_snapshot,optional"`
+	FailReasonReferenceEntryID string            `json:"fail_reason_reference_entry_id,omitempty" metadata:"fail_reason_reference_entry_id,optional"`
+	FailReasonReferenceVersion string            `json:"fail_reason_reference_version,omitempty" metadata:"fail_reason_reference_version,optional"`
+	FlaggedRecordID            string            `json:"flagged_record_id,omitempty" metadata:"flagged_record_id,optional"`
+	EngineAttestationDigest    string            `json:"engine_attestation_digest" metadata:"engine_attestation_digest"`
+	EngineVersion              string            `json:"engine_version" metadata:"engine_version"`
+	RulesRelease               string            `json:"rules_release" metadata:"rules_release"`
+	RecognitionCheck           *RecognitionCheck `json:"recognition_check,omitempty" metadata:"recognition_check,optional"`
+	Timestamp                  string            `json:"timestamp" metadata:"timestamp"`
+	SubmittedBy                string            `json:"submitted_by" metadata:"submitted_by"`
+}
+
+func verdictRecordKey(ctx contractapi.TransactionContextInterface, batchID string, recordID string) (string, error) {
+	return ctx.GetStub().CreateCompositeKey("verdictRecord", []string{batchID, recordID})
+}
+
+// latestVerdictPointerKey is a single, always-overwritten key per batch
+// holding the most recently recorded verdict. Multiple verdicts can
+// legitimately exist over a batch's life (Fail -> correction -> a fresh
+// Pass, TRD §23.5), and their record_id values are transaction IDs, not a
+// sortable sequence -- there's no ordering to recover from range-querying
+// verdictRecord alone. Wall-clock Timestamp comparison was considered and
+// rejected: two verdicts recorded within the same second (a real
+// possibility, and definitely possible against a mocked, fixed test
+// timestamp) would tie. This pointer sidesteps the ordering problem
+// entirely by construction -- whichever RecordVerdict call runs last is,
+// by definition, the one that wrote it last.
+func latestVerdictPointerKey(ctx contractapi.TransactionContextInterface, batchID string) (string, error) {
+	return ctx.GetStub().CreateCompositeKey("latestVerdictPointer", []string{batchID})
+}
+
+// recordExists checks whether recordID exists as either an ingredient or a
+// production record on this batch -- used to validate a Fail attestation's
+// flagged_record_id actually points at something real (FRD-CHAIN-VERDICT-007).
+func (c *BatchContract) recordExists(ctx contractapi.TransactionContextInterface, batchID string, recordID string) (bool, error) {
+	for _, objectType := range []string{"ingredientRecord", "productionRecord"} {
+		key, err := ctx.GetStub().CreateCompositeKey(objectType, []string{batchID, recordID})
+		if err != nil {
+			return false, fmt.Errorf("failed to build %s key: %w", objectType, err)
+		}
+		value, err := ctx.GetStub().GetState(key)
+		if err != nil {
+			return false, fmt.Errorf("failed to read world state: %w", err)
+		}
+		if value != nil {
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
+// currentFlaggedRecord returns the record ID flagged by a batch's current
+// (latest, via latestVerdictPointerKey) verdict, requiring that verdict to
+// be a Fail that actually flagged a record of the given type -- TRD §23.5:
+// "Only the owner role may correct that exact, unsuperseded flagged record
+// ... while the latest effective verdict is Fail." There is deliberately no
+// parameter anywhere in this module for a caller to name which record to
+// correct; it is always derived from the ledger's own state, the same way
+// Screen Requirements §6 describes the correction screen working ("shows
+// only the single flagged ... record, identified via the Fail verdict's
+// flagged_record_id").
+func (c *BatchContract) currentFlaggedRecord(ctx contractapi.TransactionContextInterface, batchID string, objectType string) (string, error) {
+	pointerKey, err := latestVerdictPointerKey(ctx, batchID)
+	if err != nil {
+		return "", fmt.Errorf("failed to build latest verdict pointer key: %w", err)
+	}
+	latestVerdictBytes, err := ctx.GetStub().GetState(pointerKey)
+	if err != nil {
+		return "", fmt.Errorf("failed to read world state: %w", err)
+	}
+	if latestVerdictBytes == nil {
+		return "", fmt.Errorf("sequencing_violation: batch %q has no recorded verdict to correct", batchID)
+	}
+	var latestVerdict VerdictRecord
+	if err := json.Unmarshal(latestVerdictBytes, &latestVerdict); err != nil {
+		return "", fmt.Errorf("failed to unmarshal latest verdict: %w", err)
+	}
+	if latestVerdict.Status != "fail" {
+		return "", fmt.Errorf("sequencing_violation: batch %q's current verdict is not fail; there is nothing to correct", batchID)
+	}
+
+	flaggedKey, err := ctx.GetStub().CreateCompositeKey(objectType, []string{batchID, latestVerdict.FlaggedRecordID})
+	if err != nil {
+		return "", fmt.Errorf("failed to build %s key: %w", objectType, err)
+	}
+	flaggedBytes, err := ctx.GetStub().GetState(flaggedKey)
+	if err != nil {
+		return "", fmt.Errorf("failed to read world state: %w", err)
+	}
+	if flaggedBytes == nil {
+		kind := strings.TrimSuffix(objectType, "Record")
+		return "", fmt.Errorf("sequencing_violation: the current Fail verdict did not flag any %s record on this batch", kind)
+	}
+
+	return latestVerdict.FlaggedRecordID, nil
+}
+
+// isSuperseded reports whether any record of the given type on this batch
+// already carries supersedes_record_id == recordID -- i.e. recordID has
+// already been corrected once. Only one correction is ever valid per
+// flagged record (TRD §23.5 describes correcting "that exact ... record,"
+// singular); a second attempt is rejected as a duplicate, the same
+// discipline ConfirmProduction already applies to a second plain
+// confirmation.
+func (c *BatchContract) isSuperseded(ctx contractapi.TransactionContextInterface, objectType string, batchID string, recordID string) (bool, error) {
+	values, err := collectRecordValues(ctx, objectType, batchID)
+	if err != nil {
+		return false, err
+	}
+	for _, v := range values {
+		var withSupersedes struct {
+			SupersedesRecordID string `json:"supersedes_record_id"`
+		}
+		if err := json.Unmarshal(v, &withSupersedes); err != nil {
+			return false, fmt.Errorf("failed to unmarshal %s record: %w", objectType, err)
+		}
+		if withSupersedes.SupersedesRecordID == recordID {
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
+func collectRecordValues(ctx contractapi.TransactionContextInterface, objectType string, batchID string) ([][]byte, error) {
+	iterator, err := ctx.GetStub().GetStateByPartialCompositeKey(objectType, []string{batchID})
+	if err != nil {
+		return nil, fmt.Errorf("failed to query %s records: %w", objectType, err)
+	}
+	defer iterator.Close()
+
+	var values [][]byte
+	for iterator.HasNext() {
+		kv, err := iterator.Next()
+		if err != nil {
+			return nil, fmt.Errorf("failed to read next %s record: %w", objectType, err)
+		}
+		values = append(values, kv.GetValue())
+	}
+	return values, nil
+}
+
+// computeEffectiveInputDigest hashes every ingredient and production record
+// currently on this batch, in the ledger's own deterministic key order.
+// RecordVerdict compares this against the attestation's own claimed digest
+// -- an attestation computed before a correction landed no longer matches
+// the batch's current records, and is rejected rather than silently
+// accepted against stale inputs (TRD §23.2, FRD-CHAIN-CONCURRENCY-001's
+// same "consistent snapshot, not a mixed state" discipline applied to
+// verdict recording specifically).
+func computeEffectiveInputDigest(ctx contractapi.TransactionContextInterface, batchID string) (string, error) {
+	ingredientValues, err := collectRecordValues(ctx, "ingredientRecord", batchID)
+	if err != nil {
+		return "", err
+	}
+	productionValues, err := collectRecordValues(ctx, "productionRecord", batchID)
+	if err != nil {
+		return "", err
+	}
+
+	h := sha256.New()
+	for _, v := range ingredientValues {
+		h.Write(v)
+	}
+	for _, v := range productionValues {
+		h.Write(v)
+	}
+	return hex.EncodeToString(h.Sum(nil)), nil
+}
+
+// RecordVerdict records the compliance engine's binding Pass/Fail verdict
+// (FRD-CHAIN-VERDICT-005). Compliance Officer only
+// (FRD-CHAIN-ROLE-003). The engine's output is binding -- this function
+// accepts no client-supplied verdict fields beyond a single signed
+// attestation; every substantive field (status, regulation, fail reason,
+// flagged record) comes from that attestation, verified against a public
+// key compiled into this chaincode. There is no override parameter and
+// never will be (FRD-CHAIN-VERDICT-006).
+func (c *BatchContract) RecordVerdict(
+	ctx contractapi.TransactionContextInterface,
+	attestationJSON string,
+	signatureBase64 string,
+) (*VerdictRecord, error) {
+	if err := requireRole(ctx, "compliance_officer"); err != nil {
+		return nil, err
+	}
+
+	if err := verifyAttestationSignature([]byte(attestationJSON), signatureBase64); err != nil {
+		return nil, err
+	}
+
+	var att VerdictAttestation
+	if err := json.Unmarshal([]byte(attestationJSON), &att); err != nil {
+		return nil, fmt.Errorf("failed to unmarshal attestation: %w", err)
+	}
+
+	if att.Result != "pass" && att.Result != "fail" {
+		return nil, fmt.Errorf("attestation_invalid: result must be \"pass\" or \"fail\", got %q", att.Result)
+	}
+
+	bKey, err := batchKey(ctx, att.BatchID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to build batch key: %w", err)
+	}
+	batchBytes, err := ctx.GetStub().GetState(bKey)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read world state: %w", err)
+	}
+	if batchBytes == nil {
+		return nil, fmt.Errorf("batch_not_found: batch %q does not exist", att.BatchID)
+	}
+	var batch Batch
+	if err := json.Unmarshal(batchBytes, &batch); err != nil {
+		return nil, fmt.Errorf("failed to unmarshal batch: %w", err)
+	}
+	if string(batch.IntendedMarket) != att.IntendedMarket {
+		return nil, fmt.Errorf(
+			"attestation_invalid: attestation intended_market %q does not match batch's %q",
+			att.IntendedMarket, batch.IntendedMarket,
+		)
+	}
+
+	hasProduction, err := c.hasAnyRecord(ctx, "productionRecord", att.BatchID)
+	if err != nil {
+		return nil, err
+	}
+	if !hasProduction {
+		return nil, fmt.Errorf("sequencing_violation: batch %q has no production record yet", att.BatchID)
+	}
+
+	actualDigest, err := computeEffectiveInputDigest(ctx, att.BatchID)
+	if err != nil {
+		return nil, err
+	}
+	if actualDigest != att.InputDigest {
+		return nil, fmt.Errorf("attestation_invalid: input digest does not match this batch's current records -- attestation is stale")
+	}
+
+	regulationRef, err := c.resolveReference(ctx, "standard", att.RegulationValue)
+	if err != nil {
+		return nil, err
+	}
+
+	record := VerdictRecord{
+		RecordID:                   ctx.GetStub().GetTxID(),
+		BatchID:                    att.BatchID,
+		Status:                     att.Result,
+		RegulationSnapshot:         regulationRef.Value,
+		RegulationReferenceEntryID: regulationRef.EntryID,
+		RegulationReferenceVersion: regulationRef.Version,
+		EngineAttestationDigest:    att.InputDigest,
+		EngineVersion:              att.EngineVersion,
+		RulesRelease:               att.RulesRelease,
+		RecognitionCheck:           att.RecognitionCheck,
+	}
+
+	if att.Result == "fail" {
+		if att.FailReason == "" {
+			return nil, fmt.Errorf("attestation_invalid: a fail result requires fail_reason")
+		}
+		if att.FlaggedRecordID == "" {
+			return nil, fmt.Errorf("attestation_invalid: a fail result requires flagged_record_id")
+		}
+
+		flagExists, err := c.recordExists(ctx, att.BatchID, att.FlaggedRecordID)
+		if err != nil {
+			return nil, err
+		}
+		if !flagExists {
+			return nil, fmt.Errorf(
+				"attestation_invalid: flagged_record_id %q does not reference an existing record on this batch",
+				att.FlaggedRecordID,
+			)
+		}
+
+		failReasonRef, err := c.resolveReference(ctx, "fail_reason", att.FailReason)
+		if err != nil {
+			return nil, err
+		}
+
+		record.FailReasonSnapshot = failReasonRef.Value
+		record.FailReasonReferenceEntryID = failReasonRef.EntryID
+		record.FailReasonReferenceVersion = failReasonRef.Version
+		record.FlaggedRecordID = att.FlaggedRecordID
+	}
+
+	submittedBy, err := cid.GetID(ctx.GetStub())
+	if err != nil {
+		return nil, fmt.Errorf("failed to resolve caller identity: %w", err)
+	}
+	txTimestamp, err := ctx.GetStub().GetTxTimestamp()
+	if err != nil {
+		return nil, fmt.Errorf("failed to read transaction timestamp: %w", err)
+	}
+	record.Timestamp = time.Unix(txTimestamp.GetSeconds(), int64(txTimestamp.GetNanos())).UTC().Format(time.RFC3339)
+	record.SubmittedBy = submittedBy
+
+	recordJSON, err := json.Marshal(record)
+	if err != nil {
+		return nil, fmt.Errorf("failed to marshal verdict record: %w", err)
+	}
+
+	key, err := verdictRecordKey(ctx, att.BatchID, record.RecordID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to build verdict record key: %w", err)
+	}
+	if err := ctx.GetStub().PutState(key, recordJSON); err != nil {
+		return nil, fmt.Errorf("failed to write to world state: %w", err)
+	}
+
+	// Update the latest-verdict pointer -- see latestVerdictPointerKey's
+	// comment for why this exists. This is the same narrowly-scoped,
+	// single-purpose overwrite pattern refdata's DeprecateReferenceEntry
+	// uses: a new fact about "what's current," never a rewrite of a past
+	// verdict record itself (verdictRecordKey above is only ever written
+	// once, matching every other append-only key in this module).
+	pointerKey, err := latestVerdictPointerKey(ctx, att.BatchID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to build latest verdict pointer key: %w", err)
+	}
+	if err := ctx.GetStub().PutState(pointerKey, recordJSON); err != nil {
+		return nil, fmt.Errorf("failed to write latest verdict pointer: %w", err)
+	}
+
+	return &record, nil
+}
+
+// ExportRecord mirrors docs/06_erd.md's EXPORT_RECORD. No correction mode
+// exists for this record type at all (not even a deferred one) -- nothing
+// in the FRD/ERD describes correcting an export.
+type ExportRecord struct {
+	RecordID          string `json:"record_id" metadata:"record_id"`
+	BatchID           string `json:"batch_id" metadata:"batch_id"`
+	DestinationMarket string `json:"destination_market" metadata:"destination_market"`
+	Timestamp         string `json:"timestamp" metadata:"timestamp"`
+	SubmittedBy       string `json:"submitted_by" metadata:"submitted_by"`
+}
+
+func exportRecordKey(ctx contractapi.TransactionContextInterface, batchID string, recordID string) (string, error) {
+	return ctx.GetStub().CreateCompositeKey("exportRecord", []string{batchID, recordID})
+}
+
+// RequestExport records an export release request for a batch
+// (FRD-CHAIN-SEQUENCE-003, PRD-CT-004). Export/Logistics Officer only
+// (FRD-CHAIN-ROLE-004). DestinationMarket is copied from the batch's own
+// immutable IntendedMarket -- there is no parameter for it at all, so a
+// caller cannot supply a different destination even if they tried
+// (API Reference §8: "clients must not submit a destination market at
+// export time").
+//
+// Blocked, at the chaincode level, unless the CURRENT (latest, via
+// latestVerdictPointerKey) verdict is Pass -- not just any Pass ever
+// recorded. A batch that failed after an earlier Pass (a re-verdict
+// scenario following a correction) is blocked again, matching "the latest
+// effective verdict" language used throughout TRD §23.5. A batch already
+// exported once is rejected on a second attempt -- export is a one-way,
+// one-time transition, the same discipline as ConfirmProduction's
+// duplicate-rejection above.
+func (c *BatchContract) RequestExport(
+	ctx contractapi.TransactionContextInterface,
+	batchID string,
+) (*ExportRecord, error) {
+	if err := requireRole(ctx, "export_officer"); err != nil {
+		return nil, err
+	}
+
+	bKey, err := batchKey(ctx, batchID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to build batch key: %w", err)
+	}
+	batchBytes, err := ctx.GetStub().GetState(bKey)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read world state: %w", err)
+	}
+	if batchBytes == nil {
+		return nil, fmt.Errorf("batch_not_found: batch %q does not exist", batchID)
+	}
+	var batch Batch
+	if err := json.Unmarshal(batchBytes, &batch); err != nil {
+		return nil, fmt.Errorf("failed to unmarshal batch: %w", err)
+	}
+
+	pointerKey, err := latestVerdictPointerKey(ctx, batchID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to build latest verdict pointer key: %w", err)
+	}
+	latestVerdictBytes, err := ctx.GetStub().GetState(pointerKey)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read world state: %w", err)
+	}
+	if latestVerdictBytes == nil {
+		return nil, fmt.Errorf("no_valid_verdict: batch %q has no recorded verdict", batchID)
+	}
+	var latestVerdict VerdictRecord
+	if err := json.Unmarshal(latestVerdictBytes, &latestVerdict); err != nil {
+		return nil, fmt.Errorf("failed to unmarshal latest verdict: %w", err)
+	}
+	if latestVerdict.Status != "pass" {
+		return nil, fmt.Errorf(
+			"no_valid_verdict: batch %q's current verdict is %q, not pass",
+			batchID, latestVerdict.Status,
+		)
+	}
+
+	hasExport, err := c.hasAnyRecord(ctx, "exportRecord", batchID)
+	if err != nil {
+		return nil, err
+	}
+	if hasExport {
+		return nil, fmt.Errorf("duplicate_entry: batch %q has already been exported", batchID)
+	}
+
+	submittedBy, err := cid.GetID(ctx.GetStub())
+	if err != nil {
+		return nil, fmt.Errorf("failed to resolve caller identity: %w", err)
+	}
+	txTimestamp, err := ctx.GetStub().GetTxTimestamp()
+	if err != nil {
+		return nil, fmt.Errorf("failed to read transaction timestamp: %w", err)
+	}
+
+	record := ExportRecord{
+		RecordID:          ctx.GetStub().GetTxID(),
+		BatchID:           batchID,
+		DestinationMarket: string(batch.IntendedMarket),
+		Timestamp:         time.Unix(txTimestamp.GetSeconds(), int64(txTimestamp.GetNanos())).UTC().Format(time.RFC3339),
+		SubmittedBy:       submittedBy,
+	}
+
+	recordJSON, err := json.Marshal(record)
+	if err != nil {
+		return nil, fmt.Errorf("failed to marshal export record: %w", err)
+	}
+
+	key, err := exportRecordKey(ctx, batchID, record.RecordID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to build export record key: %w", err)
+	}
 	if err := ctx.GetStub().PutState(key, recordJSON); err != nil {
 		return nil, fmt.Errorf("failed to write to world state: %w", err)
 	}

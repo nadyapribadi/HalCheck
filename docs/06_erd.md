@@ -118,12 +118,12 @@ erDiagram
     }
 
     REFERENCE_ENTRY {
-        string entry_id PK
+        string entry_id PK "composite of (type, value, version) -- one row per version, not one row per value"
         string type "enum: ingredient | supplier | standard | fail_reason"
         string value
-        string version
+        string version "starts at \"1\"; a new version may only be added once the prior version for this (type, value) is deprecated -- at most one version per value is ever active"
         string status "enum: active | deprecated"
-        string superseded_by FK "nullable, self-referencing -- no chaincode write path defined yet (see 03_frd.md FRD-CHAIN-REFDATA-002 note); stays empty until a follow-up requirement resolves it"
+        string superseded_by FK "nullable, self-referencing -- set by AddReferenceEntry when a new version replaces a deprecated one (P2 versioning redesign, docs/14_developer_setup.md §1.7); empty on the current active version and on any entry with no later version"
         json metadata "type-specific, e.g. default_halal_risk for ingredient type"
         datetime timestamp "set at creation, never changes"
         string added_by FK

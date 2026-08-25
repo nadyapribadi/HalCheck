@@ -15,6 +15,7 @@ import (
 	"encoding/pem"
 	"fmt"
 	"math/big"
+	"sort"
 	"strings"
 	"testing"
 	"time"
@@ -22,6 +23,7 @@ import (
 	"github.com/hyperledger/fabric-chaincode-go/v2/pkg/attrmgr"
 	"github.com/hyperledger/fabric-chaincode-go/v2/shim"
 	"github.com/hyperledger/fabric-contract-api-go/v2/contractapi"
+	"github.com/hyperledger/fabric-protos-go-apiv2/ledger/queryresult"
 	"github.com/hyperledger/fabric-protos-go-apiv2/msp"
 	"github.com/hyperledger/fabric-protos-go-apiv2/peer"
 	"google.golang.org/protobuf/proto"
@@ -70,6 +72,44 @@ func (m *mockChaincodeStub) GetTxTimestamp() (*timestamppb.Timestamp, error) {
 
 func (m *mockChaincodeStub) CreateCompositeKey(objectType string, attributes []string) (string, error) {
 	return shim.CreateCompositeKey(objectType, attributes)
+}
+
+// GetStateByPartialCompositeKey matches every stored key whose composite
+// encoding starts with objectType+attributes -- the real semantics
+// (CreateCompositeKey's prefix IS the partial-key query string). Results
+// are sorted by key for deterministic test assertions.
+func (m *mockChaincodeStub) GetStateByPartialCompositeKey(objectType string, attributes []string) (shim.StateQueryIteratorInterface, error) {
+	prefix, err := shim.CreateCompositeKey(objectType, attributes)
+	if err != nil {
+		return nil, err
+	}
+
+	var matched []*queryresult.KV
+	for key, value := range m.state {
+		if strings.HasPrefix(key, prefix) {
+			matched = append(matched, &queryresult.KV{Key: key, Value: value})
+		}
+	}
+	sort.Slice(matched, func(i, j int) bool { return matched[i].Key < matched[j].Key })
+
+	return &mockStateQueryIterator{items: matched}, nil
+}
+
+// mockStateQueryIterator implements shim.StateQueryIteratorInterface over
+// an in-memory slice -- GetStateByPartialCompositeKey's real return type.
+type mockStateQueryIterator struct {
+	items []*queryresult.KV
+	pos   int
+}
+
+func (it *mockStateQueryIterator) HasNext() bool { return it.pos < len(it.items) }
+
+func (it *mockStateQueryIterator) Close() error { return nil }
+
+func (it *mockStateQueryIterator) Next() (*queryresult.KV, error) {
+	item := it.items[it.pos]
+	it.pos++
+	return item, nil
 }
 
 func (m *mockChaincodeStub) InvokeChaincode(chaincodeName string, args [][]byte, channel string) *peer.Response {
@@ -194,4 +234,22 @@ func (ctx *mockTransactionContext) actingAs(t *testing.T, mspID, role string) *m
 		invokeResponses: ctx.stub.invokeResponses,
 		txID:            ctx.stub.txID,
 	}}
+}
+
+// withTestAttestationKey swaps the package-level verdictAttestationPublicKey
+// for a freshly-generated test keypair for the duration of a single test,
+// restoring the real (compiled-in) key afterward via t.Cleanup. This is
+// what lets tests exercise RecordVerdict's actual signature-verification
+// logic without ever touching the real private key, which -- correctly --
+// isn't in this repository at all (see batch.go's comment on the const).
+func withTestAttestationKey(t *testing.T) *ecdsa.PrivateKey {
+	t.Helper()
+	priv, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		t.Fatalf("failed to generate test attestation key: %v", err)
+	}
+	original := verdictAttestationPublicKey
+	verdictAttestationPublicKey = &priv.PublicKey
+	t.Cleanup(func() { verdictAttestationPublicKey = original })
+	return priv
 }

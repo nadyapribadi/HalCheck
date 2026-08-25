@@ -2,9 +2,10 @@
 
 ## Project Overview
 
-HALCHECK is the product repository. Compliance Trail is its planned
-Hyperledger Fabric accountability module for halal compliance in contract
-manufacturing. Six roles, each cryptographically identified, submit records
+HALCHECK is the product repository. Compliance Trail is its Hyperledger
+Fabric accountability module for halal compliance in contract manufacturing
+(chaincode functionally complete as of P2, deployed live — backend/frontend
+not yet built). Six roles, each cryptographically identified, submit records
 through a sequenced batch lifecycle enforced by chaincode — not by the UI.
 
 ## The One Rule That Matters Most
@@ -25,7 +26,7 @@ npm test          # vitest — evaluate()/rationale()/runScreening() against
                    # the three canonical SL-2026-00x scenarios (docs/12)
 npm run typecheck
 
-# Chaincode (not yet implemented — see docs/13_implementation_plan.md P2)
+# Chaincode (P2 functionally complete — see docs/14_developer_setup.md §1.3-1.6)
 cd chaincode/batch && go test ./...
 cd chaincode/refdata && go test ./...
 
@@ -78,7 +79,8 @@ Log, which is insert-only at the database grant level.
 ## Current Work Context
 
 Status: Design complete. Repo-hygiene pass accepted (`docs/19_repository_structure.md`
-§11). Build in progress on both modules:
+§11). Core Screening App complete; Compliance Trail chaincode (P2) functionally
+complete, P3 not yet started:
 
 ### Core Screening App — functionally complete for v1 scope
 
@@ -97,7 +99,7 @@ against all 3 canonical SL-2026-00x scenarios from `docs/12`. See
 - 2-org test network up (peers, Raft orderer, 3 CAs); `compliancetrail` channel created and joined.
 - `basicgo` sample chaincode installed, approved by both orgs, and **committed** (sequence 2).
 - Sample transaction proven both directions: `InitLedger` submitted, `GetAllAssets` queried successfully.
-- **Not yet closed:** `scripts/backup-volumes.sh` couldn't be exercised — Docker Hub was unreachable for the `alpine` pull (confirmed not a sandboxing artifact, still true as of P1). Retry once registry connectivity is available; this is P0's one remaining exit criterion.
+- **Closed (2026-08-25):** `scripts/backup-volumes.sh` retried and ran cleanly end-to-end — `alpine` pulled without issue, all three named volumes mounted, `tar` archives produced (originally blocked by transient Docker Hub unreachability; long since resolved). `halcheck_postgres-data`/`-minio-data`/`-couchdb-data` don't hold real data yet since `docker-compose.yml` is still `services: {}` (P4/P5 not started) — the auto-created empty volumes this run produced were deleted afterward as test artifacts, not real state. This was P0's one remaining exit criterion; P0 is now fully closed.
 
 **P1 — Identity Setup, fully proven (`docs/14_developer_setup.md` §1.2):**
 - All 6 roles issued real Fabric CA identities (Org1 CA), each carrying a `role` custom attribute matching `06_erd.md`'s `IDENTITY.role` enum exactly (`ingredient_qa`, `production_qa`, `compliance_officer`, `export_officer`, `brand_owner`, `system_admin`).
@@ -120,7 +122,7 @@ Screening App sections, never touched existing Compliance Trail content;
 | 4 | Canonical Role × Field × Access matrix (TRD §23.4) | synchronized |
 | 5 | Uniform corrections (ingredient + production `supersedes_record_id`) | synchronized |
 
-**P2 — Chaincode Core Rules, in progress (`docs/14_developer_setup.md` §1.3):**
+**P2 — Chaincode Core Rules, functionally complete (`docs/14_developer_setup.md` §1.3-§1.6):**
 - `refdata` (5 functions: `AddReferenceEntry`, `DeprecateReferenceEntry`,
   `ResolveActiveReference`, `GetReferenceEntryHistory`,
   `ListReferenceEntries`) and `batch` (2 functions: `CreateBatch`,
@@ -142,9 +144,139 @@ Screening App sections, never touched existing Compliance Trail content;
   both modules, redeployed as v1.1. Full incident write-up in
   `docs/14_developer_setup.md` §1.3 — worth reading before writing more
   contractapi-based chaincode functions.
-- Next: `batch` sequencing functions (production confirmation, verdict,
-  export) and correction-mode ingredient submission
-  (`supersedes_record_id`), then P3 (formal negative-test-matrix pass) once
-  P2's function set is complete. Critical tier per
-  `docs/18_vibe_coding_guardrails.md` §2 throughout — every function needs
-  human line-by-line review before acceptance, not just a passing test.
+- `ConfirmProduction` added (Production QA only, requires a prior ingredient
+  record, resolves the CPKB standard through `refdata` the same way
+  ingredients/suppliers are resolved). 22 `batch` tests total. Deployed live
+  as v1.2 with the `metadata` struct tags applied proactively from the
+  start — worked on the first live invoke, no repeat of the v1.1 incident.
+  Both the happy path and the sequencing-violation rejection (production
+  attempted before any ingredient record exists) proven live.
+- `RecordVerdict` added — the binding, signed engine-attestation contract
+  from TRD §23.2, in full (`docs/14_developer_setup.md` §1.4). Compliance
+  Officer only; verifies a real ECDSA P-256 signature against a public key
+  compiled into the chaincode (private key generated for local testing,
+  lives entirely outside this repo); independently recomputes the input
+  digest from the batch's *actual current* records and rejects a stale
+  attestation; resolves the governing regulation and (for Fail) the catalog
+  fail reason through `refdata`; verifies a Fail's flagged record actually
+  exists on the batch. 31 `batch` tests total. Deployed live as v1.3
+  (sequence 4) and proven with a **genuinely signed** attestation — not a
+  test fixture — built from the exact ledger bytes captured in the P0.1.3
+  entry, both the pass verdict and a wrong-role rejection confirmed live.
+- `RequestExport` added — **the full batch lifecycle is now built:**
+  `CreateBatch -> SubmitIngredient -> ConfirmProduction -> RecordVerdict ->
+  RequestExport` (`docs/14_developer_setup.md` §1.5). Export/Logistics
+  Officer only; destination is copied from the batch's own immutable
+  market with no parameter to override it; blocked unless the *current*
+  verdict (not just any Pass ever recorded) is Pass; rejects a second
+  export on an already-exported batch. Required adding a small
+  "latest verdict pointer" mechanism to `RecordVerdict` (touching an
+  already-deployed function again, transparently) since multiple verdicts
+  can legitimately exist over a batch's life and their record IDs aren't a
+  sortable sequence. 38 `batch` tests total. Deployed live as v1.4
+  (sequence 5); happy path, duplicate-export rejection, and no-verdict
+  rejection all proven live — including the real consequence of the
+  pointer mechanism being new: the earlier live Pass verdict (recorded
+  under v1.3) had no pointer and had to be re-recorded under v1.4 before
+  export would work, which is correct, not a bug.
+- `CorrectIngredient`/`CorrectProduction` added — TRD §23.5's uniform
+  correction model, closing out P2's function set
+  (`docs/14_developer_setup.md` §1.6). `SubmitIngredient`/`ConfirmProduction`
+  refactored into thin role/state wrappers over a shared writer
+  (behavior-preserving: all 38 pre-existing tests passed unchanged before
+  any new test was added). There is no parameter anywhere for a caller to
+  name which record to correct — it's always derived from the batch's own
+  latest verdict (must be Fail, must have flagged a record of the matching
+  type) via a new `currentFlaggedRecord` helper; a second correction against
+  the same flagged record is rejected as `duplicate_entry` via a new
+  `isSuperseded` helper. 53 `batch` tests total (a `CorrectProduction`
+  premature-correction-attempt test, TRD §23.6's own required-test wording,
+  was added during a subsequent doc-alignment review). Deployed live as v1.5
+  (sequence 6); a "wrong record type flagged" rejection message read
+  awkwardly on its first live run (not a behavior bug), fixed and
+  redeployed as v1.6 (sequence 7) through the full formal lifecycle again.
+  Both correction functions proven live on two fresh batches — happy path,
+  duplicate-correction rejection, wrong-role rejection, and the
+  ingredient/production cross-check (a Fail that flagged one record type is
+  refused by the other type's correction function) all confirmed against
+  the real network, using genuinely signed Fail attestations (first Fail
+  verdicts ever recorded live in this project).
+- Reference-data versioning redesign (`docs/14_developer_setup.md` §1.7):
+  scoping P3 surfaced that `refdata.AddReferenceEntry` hardcoded
+  `Version: "1"` forever with no way to ever create "version 2" of
+  anything — a real design gap, not a missing test. Redesigned the ledger
+  key to `(type, value, version)`; a value's only-existing-version being
+  deprecated now allows re-adding it as the next version, backfilling
+  `SupersededBy` on the one it replaces. `batch` needed no changes.
+  **A real bug caught live, not by unit tests:** `DeprecateReferenceEntry`
+  and two other functions recomputed an entry's key from its own fields
+  instead of reusing the key it was actually read from — harmless for
+  entries the redesigned code itself creates, but silently wrote to the
+  wrong key for the pre-existing entries already live on the network from
+  earlier in P2. Fixed by threading each entry's real key through
+  everywhere a write-back happens; two regression tests added
+  (`TestDeprecateReferenceEntry_SucceedsAgainstLegacyKeyFormat`,
+  `TestAddReferenceEntry_NewVersionAfterDeprecatingLegacyEntrySucceeds`).
+  29 `refdata` tests total. Deployed live as v1.4 (sequence 5) after v1.2
+  and v1.3 both hit an infra-only "chaincode image never built" incident
+  isolated to Org1's peer (Org2 built and ran the identical package fine
+  throughout) — resolved by a second peer restart, no Docker Desktop
+  restart needed. Fully proven live against a value that predates this
+  redesign: deprecate → re-add as v2 → resolve correctly → duplicate/
+  already-deprecated rejections both confirmed. One permanent, harmless
+  orphaned ledger entry remains from the pre-fix buggy write — left as-is,
+  consistent with this project's own append-only discipline.
+- **P2 is functionally complete.** Every `batch` and `refdata` function
+  from the design docs is built, unit-tested, and deployed live.
+
+**P3 — Chaincode conformance, chaincode-scope complete (`docs/14_developer_setup.md` §1.8):**
+Scoped the Enforcement Test Matrix (`docs/07_test_strategy.md` §3) against
+what's built: most rows were already covered by P2's accumulated unit
+tests. Three rows genuinely needed new live-network proof, since they
+require real MVCC behavior the mock can't simulate:
+- **Reference-data snapshot immutability** — two batches' production
+  records captured `standard`/`CPKB` on either side of a real version
+  bump (v3 → v4); the earlier batch's snapshot is permanently what's on
+  the ledger, since no function ever writes to an existing record's key
+  again.
+- **Concurrency conflict handling** — two genuinely simultaneous
+  `CreateBatch` calls against the contested `batchCounter` key. Both
+  endorsed successfully (simulation can't detect it); block validation
+  correctly invalidated one with `MVCC_READ_CONFLICT`, the other
+  committed cleanly, zero custom locking code anywhere.
+- **Reference-data interaction under concurrency** — `SubmitIngredient`
+  racing a concurrent `DeprecateReferenceEntry` on the same value.
+  Invalidated with `PHANTOM_READ_CONFLICT` — not `MVCC_READ_CONFLICT` —
+  confirming the range-query-based mechanism predicted in
+  `ResolveActiveReference`'s own comment when it was rewritten for
+  versioning. The `SubmitIngredient` client saw "successful" at
+  endorsement; no record was actually written — concrete proof that
+  endorsement success isn't commit success.
+
+Immutability itself (edit/delete an existing record) isn't runtime-tested
+— there's no function to even attempt it, a structural guarantee, not a
+tested one. Remaining matrix rows (audit log, identity spoofing,
+field-level access, idempotency, tunnel exposure) need a backend that
+doesn't exist yet — P4.
+
+**Two gaps closed before starting P4 (2026-08-25):**
+- `scripts/backup-volumes.sh` retried and ran cleanly — `alpine` pulled,
+  all three volumes mounted, `tar` archives produced. Originally blocked
+  by transient Docker Hub unreachability back in P0; long since resolved,
+  just never revisited. The named volumes don't hold real data yet since
+  `docker-compose.yml` is still `services: {}` (P4/P5 not started); the
+  empty auto-created volumes this run produced were deleted afterward.
+  **P0 is now fully closed.**
+- The full failure-lifecycle recovery arc — a batch that fails, gets
+  corrected, receives a fresh Pass verdict, and successfully exports — had
+  only ever been proven in individual pieces, never chained together live
+  (`docs/14_developer_setup.md` §1.9). Proven end-to-end on `SL-2026-010`:
+  Fail (flagging the ingredient record) → `RequestExport` correctly
+  blocked (`no_valid_verdict`) → `CorrectIngredient` → a fresh Pass
+  verdict whose `input_digest` was recomputed over both the corrected and
+  original ingredient records plus the untouched production record, in
+  the ledger's own key-sorted order → `RequestExport` succeeds.
+
+Critical tier per `docs/18_vibe_coding_guardrails.md` §2 throughout —
+every function needs human line-by-line review before acceptance, not
+just a passing test.

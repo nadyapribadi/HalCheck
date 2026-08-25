@@ -151,7 +151,7 @@ Two demonstration modes, both clearly framed as not affecting real data:
 
 ### 12.1 Add Reference Entry (modal)
 **Fields:** Entry name/value (free text — the legitimate exception, since System Admin defines the vocabulary); category-specific metadata (e.g., default Halal Risk classification for Ingredients).
-**Validation:** reject exact-duplicate entry names within the same category (case-insensitive).
+**Validation:** reject exact-duplicate entry names within the same category (case-insensitive) *while an active entry with that name exists*. Re-adding a name whose only existing entries are deprecated is not a duplicate — it's the next version, chained to the deprecated one it replaces.
 **Actions:** Submit, Cancel.
 
 ### 12.2 Deprecate Reference Entry (modal)
