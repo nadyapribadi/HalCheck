@@ -30,7 +30,12 @@ npm run typecheck
 cd chaincode/batch && go test ./...
 cd chaincode/refdata && go test ./...
 
-# Backend
+# Backend (P4 in progress — auth, gateway wrapper, RBAC serializer built
+# and tested; batch/refdata routes not yet built)
+cd backend && npm test          # vitest — against the real local Postgres
+                                 # and Fabric network, not mocked (matches
+                                 # docs/07_test_strategy.md §2's own
+                                 # unit-vs-conformance distinction)
 cd backend && npm run dev
 
 # Frontend
@@ -51,6 +56,9 @@ Log, which is insert-only at the database grant level.
 
 - Chaincode: Go, business rules only — no I/O beyond ledger reads/writes.
 - Backend: Node/Express, thin translation layer, never holds authority.
+- API endpoints model ledger resources and actions, never a specific
+  screen's shape (`docs/04_trd.md` §8) — a frontend redesign or an
+  unplanned flow change should never require a backend change.
 - No update/delete function on any ledger record type, ever — corrections
   are new, linked records.
 - Every chaincode function needs a paired negative test in the same commit.
@@ -75,6 +83,11 @@ Log, which is insert-only at the database grant level.
   answer beyond the specific batch's own recorded data.
 - Skip the P1.5 decisions in `docs/13_implementation_plan.md` — they're
   already resolved; don't re-derive them differently mid-Build.
+- Add a backend endpoint, response field, or session/wizard state because
+  one specific screen wants it shaped that way — reuse or extend an
+  existing resource endpoint instead (`docs/04_trd.md` §8).
+- Put a "next step" instruction in any API response — screen sequencing
+  is a frontend routing decision, never the backend's to make.
 
 ## Current Work Context
 

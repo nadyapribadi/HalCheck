@@ -1,6 +1,7 @@
 # Secrets
 .env
 .env.local
+*.credentials.local
 network/wallet/
 network/crypto-config/
 network/organizations/

@@ -155,6 +155,35 @@ func (c *BatchContract) CreateBatch(
 	return &batch, nil
 }
 
+// ListBatches returns every batch on the ledger -- lightweight (just the
+// Batch record, not each one's full trail; a caller wanting a specific
+// batch's records still calls GetBatchTrail). No role restriction, matching
+// every other read function in this module and refdata: any operational
+// role may need to see what batches exist (TRD §23.4). "batch" is its own
+// composite-key namespace (batchKey), distinct from "batchCounter", so this
+// iterates only real batches.
+func (c *BatchContract) ListBatches(ctx contractapi.TransactionContextInterface) ([]*Batch, error) {
+	iterator, err := ctx.GetStub().GetStateByPartialCompositeKey("batch", []string{})
+	if err != nil {
+		return nil, fmt.Errorf("failed to query batches: %w", err)
+	}
+	defer iterator.Close()
+
+	batches := make([]*Batch, 0)
+	for iterator.HasNext() {
+		kv, err := iterator.Next()
+		if err != nil {
+			return nil, fmt.Errorf("failed to read next batch: %w", err)
+		}
+		var batch Batch
+		if err := json.Unmarshal(kv.GetValue(), &batch); err != nil {
+			return nil, fmt.Errorf("failed to unmarshal batch: %w", err)
+		}
+		batches = append(batches, &batch)
+	}
+	return batches, nil
+}
+
 // nextBatchID allocates the next SL-YYYY-NNN sequence number for the given
 // year (ERD: `batch_id PK "format SL-YYYY-NNN"`). Reading then writing the
 // same counter key means two genuinely concurrent CreateBatch calls in the
@@ -610,11 +639,12 @@ func (c *BatchContract) recordProduction(
 // verification-key change requires a reviewed chaincode lifecycle
 // upgrade"). The matching private key lives outside this repository
 // entirely, under the same discipline as every other piece of generated
-// Fabric crypto material -- see docs/14_developer_setup.md §1.4. Until the
-// real backend (P4) exists to own signing, this keypair stands in for it.
+// Fabric crypto material -- see docs/14_developer_setup.md §1.4. This is
+// the real backend's (P4) signing key -- backend/src/verdict/sign.ts holds
+// the private half.
 const verdictAttestationPublicKeyPEM = `-----BEGIN PUBLIC KEY-----
-MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEBVk3G7NxiwULT61noH5Q0d4GC1zG
-dYTHAv9hbPKBtmrwsOk+IQkHsKzFFt09D7AHMjsLy5lnhWtSs/efOZhc7g==
+MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAELaxgFn/pJwcCaNyj57eABcZR2lSn
+p9LMHEAw0EgdFR5xg7eZuZvCeiX9XQ1Nj71Hw/uu2rI2bnPxAx6+TKf4TA==
 -----END PUBLIC KEY-----`
 
 var verdictAttestationPublicKey = mustParseECDSAPublicKey(verdictAttestationPublicKeyPEM)
@@ -857,6 +887,86 @@ func computeEffectiveInputDigest(ctx contractapi.TransactionContextInterface, ba
 		h.Write(v)
 	}
 	return hex.EncodeToString(h.Sum(nil)), nil
+}
+
+// BatchTrail is the read path this module has lacked since P2
+// (docs/04_trd.md §9 named CouchDB as the eventual read path; this is
+// simpler and, for EffectiveInputDigest specifically, can't drift from
+// RecordVerdict's own acceptance check the way an independent CouchDB
+// query reimplementing the hash order could -- it calls the exact same
+// computeEffectiveInputDigest used there). No field is ,omitempty/optional
+// here: a fresh batch legitimately has zero production/verdict/export
+// records, and every slice is always present as [] rather than omitted,
+// so there's no contractapi schema-required gap to hit (the P2 incident,
+// docs/14_developer_setup.md §1.3).
+type BatchTrail struct {
+	Batch                *Batch              `json:"batch" metadata:"batch"`
+	IngredientRecords    []*IngredientRecord `json:"ingredient_records" metadata:"ingredient_records"`
+	ProductionRecords    []*ProductionRecord `json:"production_records" metadata:"production_records"`
+	VerdictRecords       []*VerdictRecord    `json:"verdict_records" metadata:"verdict_records"`
+	ExportRecords        []*ExportRecord     `json:"export_records" metadata:"export_records"`
+	EffectiveInputDigest string              `json:"effective_input_digest" metadata:"effective_input_digest"`
+}
+
+// GetBatchTrail returns everything recorded for a batch. No role
+// restriction, matching every read function in refdata -- TRD §23.4 marks
+// batch/trail data R for every operational role; a batch's own trail is
+// what Screen Requirements' trail view and the verdict-attestation flow
+// both need to read.
+func (c *BatchContract) GetBatchTrail(ctx contractapi.TransactionContextInterface, batchID string) (*BatchTrail, error) {
+	batch, err := requireBatchExists(ctx, batchID)
+	if err != nil {
+		return nil, err
+	}
+
+	ingredients, err := unmarshalRecords[IngredientRecord](ctx, "ingredientRecord", batchID)
+	if err != nil {
+		return nil, err
+	}
+	production, err := unmarshalRecords[ProductionRecord](ctx, "productionRecord", batchID)
+	if err != nil {
+		return nil, err
+	}
+	verdicts, err := unmarshalRecords[VerdictRecord](ctx, "verdictRecord", batchID)
+	if err != nil {
+		return nil, err
+	}
+	exports, err := unmarshalRecords[ExportRecord](ctx, "exportRecord", batchID)
+	if err != nil {
+		return nil, err
+	}
+
+	digest, err := computeEffectiveInputDigest(ctx, batchID)
+	if err != nil {
+		return nil, err
+	}
+
+	return &BatchTrail{
+		Batch:                batch,
+		IngredientRecords:    ingredients,
+		ProductionRecords:    production,
+		VerdictRecords:       verdicts,
+		ExportRecords:        exports,
+		EffectiveInputDigest: digest,
+	}, nil
+}
+
+// unmarshalRecords is collectRecordValues plus typed unmarshaling, shared
+// by GetBatchTrail's four record types.
+func unmarshalRecords[T any](ctx contractapi.TransactionContextInterface, objectType string, batchID string) ([]*T, error) {
+	values, err := collectRecordValues(ctx, objectType, batchID)
+	if err != nil {
+		return nil, err
+	}
+	records := make([]*T, 0, len(values))
+	for _, v := range values {
+		var r T
+		if err := json.Unmarshal(v, &r); err != nil {
+			return nil, fmt.Errorf("failed to unmarshal %s: %w", objectType, err)
+		}
+		records = append(records, &r)
+	}
+	return records, nil
 }
 
 // RecordVerdict records the compliance engine's binding Pass/Fail verdict

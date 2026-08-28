@@ -6,5 +6,30 @@ x-default-logging: &default-logging
     max-size: "10m"
     max-file: "3"
 
-# Services are added during P0 once the Fabric sample network shape is confirmed.
-services: {}
+# Fabric network itself runs outside this compose file (fabric-samples
+# test-network, per docs/14_developer_setup.md) -- this orchestrates the
+# off-chain stores that sit alongside it. Services are added incrementally
+# per docs/13_implementation_plan.md's phase order (P5 added postgres).
+services:
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:?POSTGRES_USER must be set}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set}
+      POSTGRES_DB: ${POSTGRES_DB:-compliancetrail}
+      HALCHECK_APP_DB_PASSWORD: ${HALCHECK_APP_DB_PASSWORD:?HALCHECK_APP_DB_PASSWORD must be set}
+    ports:
+      - "127.0.0.1:5432:5432"
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+      - ./db/init:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    logging: *default-logging
+
+volumes:
+  postgres-data:

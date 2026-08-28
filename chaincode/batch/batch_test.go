@@ -1409,3 +1409,129 @@ func TestCorrectProduction_SecondCorrectionRejected(t *testing.T) {
 		t.Fatalf("expected a duplicate_entry rejection, got: %v", err)
 	}
 }
+
+func TestGetBatchTrail_FreshBatchHasEmptySlicesNotNull(t *testing.T) {
+	ctx := newIdentityContext(t, "Org1MSP", "ingredient_qa")
+	contract := &BatchContract{}
+	batch, err := contract.CreateBatch(ctx, "Malaysia")
+	if err != nil {
+		t.Fatalf("expected CreateBatch to succeed, got: %v", err)
+	}
+
+	trail, err := contract.GetBatchTrail(ctx, batch.BatchID)
+	if err != nil {
+		t.Fatalf("expected GetBatchTrail to succeed, got: %v", err)
+	}
+	if trail.Batch.BatchID != batch.BatchID {
+		t.Fatalf("expected Batch.BatchID %q, got %q", batch.BatchID, trail.Batch.BatchID)
+	}
+	if trail.IngredientRecords == nil || trail.ProductionRecords == nil || trail.VerdictRecords == nil || trail.ExportRecords == nil {
+		t.Fatal("expected every record slice to be [], not nil -- a nil slice marshals as JSON null, which would trip contractapi schema validation the same way the P2 metadata-tag incident did")
+	}
+	if len(trail.IngredientRecords) != 0 || len(trail.ProductionRecords) != 0 {
+		t.Fatalf("expected no records yet, got: %+v", trail)
+	}
+	if trail.EffectiveInputDigest == "" {
+		t.Fatal("expected EffectiveInputDigest to always be populated, even for a batch with no records")
+	}
+}
+
+func TestGetBatchTrail_ReturnsSubmittedRecordsAndMatchingDigest(t *testing.T) {
+	ctx, batch := batchWithIngredient(t)
+	stubResolveActiveReference(ctx.stub, "standard", "CPKB", "e3", "1", "")
+	prodCtx := ctx.actingAs(t, "Org1MSP", "production_qa")
+	contract := &BatchContract{}
+	if _, err := contract.ConfirmProduction(prodCtx, batch.BatchID, true); err != nil {
+		t.Fatalf("expected ConfirmProduction to succeed, got: %v", err)
+	}
+
+	trail, err := contract.GetBatchTrail(ctx, batch.BatchID)
+	if err != nil {
+		t.Fatalf("expected GetBatchTrail to succeed, got: %v", err)
+	}
+	if len(trail.IngredientRecords) != 1 || trail.IngredientRecords[0].IngredientNameSnapshot != "Aqua" {
+		t.Fatalf("expected one Aqua ingredient record, got: %+v", trail.IngredientRecords)
+	}
+	if len(trail.ProductionRecords) != 1 || !trail.ProductionRecords[0].LineSegregationConfirmed {
+		t.Fatalf("expected one confirmed production record, got: %+v", trail.ProductionRecords)
+	}
+
+	// The digest RecordVerdict will independently recompute must match what
+	// GetBatchTrail hands the caller to attest over -- same underlying
+	// function, but asserting the two calls agree guards against someone
+	// later wiring GetBatchTrail to a different helper by mistake.
+	wantDigest, err := computeEffectiveInputDigest(ctx, batch.BatchID)
+	if err != nil {
+		t.Fatalf("failed to independently compute digest: %v", err)
+	}
+	if trail.EffectiveInputDigest != wantDigest {
+		t.Fatalf("expected EffectiveInputDigest %q to match computeEffectiveInputDigest %q", trail.EffectiveInputDigest, wantDigest)
+	}
+}
+
+func TestGetBatchTrail_NonexistentBatchRejected(t *testing.T) {
+	ctx := newIdentityContext(t, "Org1MSP", "ingredient_qa")
+	contract := &BatchContract{}
+
+	_, err := contract.GetBatchTrail(ctx, "SL-2026-999")
+	if err == nil || !strings.Contains(err.Error(), "batch_not_found") {
+		t.Fatalf("expected a batch_not_found rejection, got: %v", err)
+	}
+}
+
+// No role restriction: any operational role may read a batch's own trail
+// (TRD §23.4), matching every read function in refdata.
+func TestGetBatchTrail_AnyRoleCanRead(t *testing.T) {
+	ctx, batch := batchWithIngredient(t)
+	contract := &BatchContract{}
+
+	for _, role := range []string{"production_qa", "compliance_officer", "export_officer", "brand_owner", "system_admin"} {
+		roleCtx := ctx.actingAs(t, "Org1MSP", role)
+		if _, err := contract.GetBatchTrail(roleCtx, batch.BatchID); err != nil {
+			t.Fatalf("expected GetBatchTrail to succeed for role %q, got: %v", role, err)
+		}
+	}
+}
+
+func TestListBatches_ReturnsEveryCreatedBatch(t *testing.T) {
+	ctx := newIdentityContext(t, "Org1MSP", "ingredient_qa")
+	contract := &BatchContract{}
+
+	first, err := contract.CreateBatch(ctx, "Malaysia")
+	if err != nil {
+		t.Fatalf("expected first CreateBatch to succeed, got: %v", err)
+	}
+	ctx.stub.txID = "second-batch-tx"
+	second, err := contract.CreateBatch(ctx, "Indonesia")
+	if err != nil {
+		t.Fatalf("expected second CreateBatch to succeed, got: %v", err)
+	}
+
+	batches, err := contract.ListBatches(ctx)
+	if err != nil {
+		t.Fatalf("expected ListBatches to succeed, got: %v", err)
+	}
+	if len(batches) != 2 {
+		t.Fatalf("expected 2 batches, got %d: %+v", len(batches), batches)
+	}
+	ids := map[string]bool{batches[0].BatchID: true, batches[1].BatchID: true}
+	if !ids[first.BatchID] || !ids[second.BatchID] {
+		t.Fatalf("expected both %q and %q in the list, got: %+v", first.BatchID, second.BatchID, batches)
+	}
+}
+
+func TestListBatches_EmptyLedgerReturnsEmptySliceNotNull(t *testing.T) {
+	ctx := newIdentityContext(t, "Org1MSP", "ingredient_qa")
+	contract := &BatchContract{}
+
+	batches, err := contract.ListBatches(ctx)
+	if err != nil {
+		t.Fatalf("expected ListBatches to succeed, got: %v", err)
+	}
+	if batches == nil {
+		t.Fatal("expected [] not nil for an empty ledger")
+	}
+	if len(batches) != 0 {
+		t.Fatalf("expected 0 batches, got %d", len(batches))
+	}
+}
