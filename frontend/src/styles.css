@@ -1,0 +1,539 @@
+/* Design tokens as specified in docs/09_ui_specification.md §4. Every colour
+   below is used through a token so the palette stays in one place. */
+:root {
+  --status-pass: #14713f;
+  --status-pass-bg: #e8f5ed;
+  --status-fail: #b3261e;
+  --status-fail-bg: #fdecea;
+  --status-pending: #8a6d1f;
+  --status-pending-bg: #fdf4e3;
+  --status-superseded: #6b7280;
+  --status-superseded-bg: #f1f2f4;
+  --text-primary: #14181f;
+  --text-secondary: #5b6270;
+  --border: #dfe3e8;
+  --bg-surface: #ffffff;
+  --bg-page: #f6f7f9;
+  --ai-accent: #6b5ca5;
+  --ai-accent-bg: #f4f2fb;
+  --timeline-connector: #d3d8e0;
+  --focus: #1f5fbf;
+
+  --font-body: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  --font-mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+
+  --space-xs: 4px;
+  --space-sm: 8px;
+  --space-md: 16px;
+  --space-lg: 24px;
+  --space-xl: 32px;
+  --radius: 4px;
+
+  color-scheme: light;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  background: var(--bg-page);
+  color: var(--text-primary);
+  font-family: var(--font-body);
+  font-size: 14px;
+  line-height: 1.5;
+}
+
+h1 {
+  font-size: 24px;
+  margin: 0;
+  letter-spacing: -0.01em;
+}
+
+h2 {
+  font-size: 20px;
+  margin: 0 0 var(--space-md);
+}
+
+h3 {
+  font-size: 16px;
+  margin: 0 0 var(--space-sm);
+}
+
+p {
+  margin: 0 0 var(--space-md);
+}
+
+a {
+  color: var(--focus);
+}
+
+.mono {
+  font-family: var(--font-mono);
+  font-size: 13px;
+}
+
+.muted {
+  color: var(--text-secondary);
+}
+
+.page {
+  max-width: 1040px;
+  margin: 0 auto;
+  padding: var(--space-lg) var(--space-md) 64px;
+}
+
+.stack > * + * {
+  margin-top: var(--space-md);
+}
+
+.row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm);
+  flex-wrap: wrap;
+}
+
+.row-between {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-md);
+  flex-wrap: wrap;
+}
+
+/* ---------- RoleContextBar ---------- */
+
+.context-bar {
+  position: sticky;
+  top: 0;
+  z-index: 10;
+  background: var(--bg-surface);
+  border-bottom: 1px solid var(--border);
+}
+
+.context-bar-inner {
+  max-width: 1040px;
+  margin: 0 auto;
+  padding: var(--space-sm) var(--space-md);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-md);
+}
+
+.brand {
+  font-weight: 600;
+  letter-spacing: 0.02em;
+}
+
+.brand span {
+  color: var(--text-secondary);
+  font-weight: 400;
+  margin-left: var(--space-sm);
+}
+
+.badge {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-xs);
+  background: var(--status-pending-bg);
+  color: var(--status-pending);
+  border: 1px solid #ecd9ad;
+  border-radius: 999px;
+  padding: 2px 10px;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.badge:disabled {
+  cursor: default;
+}
+
+/* ---------- Surfaces ---------- */
+
+.card {
+  background: var(--bg-surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: var(--space-md);
+}
+
+.card-tight {
+  padding: var(--space-sm) var(--space-md);
+}
+
+.card-emphasis {
+  border-color: var(--ai-accent);
+  background: var(--ai-accent-bg);
+}
+
+.sandbox {
+  border: 2px solid #d9a441;
+  background: #fffbf2;
+}
+
+/* ---------- Tables ---------- */
+
+table {
+  width: 100%;
+  border-collapse: collapse;
+  background: var(--bg-surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  overflow: hidden;
+}
+
+th,
+td {
+  text-align: left;
+  padding: 10px var(--space-md);
+  border-bottom: 1px solid var(--border);
+  vertical-align: middle;
+}
+
+th {
+  font-size: 13px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--text-secondary);
+  background: #fafbfc;
+}
+
+tbody tr:last-child td {
+  border-bottom: none;
+}
+
+tbody tr.clickable:hover {
+  background: #fafbfc;
+  cursor: pointer;
+}
+
+tr.flagged {
+  background: var(--status-pending-bg);
+}
+
+tr.superseded td {
+  color: var(--text-secondary);
+}
+
+/* ---------- Status badges ---------- */
+
+.status {
+  display: inline-block;
+  border-radius: var(--radius);
+  padding: 2px 8px;
+  font-size: 13px;
+  border: 1px solid transparent;
+  white-space: nowrap;
+}
+
+.status-pass {
+  color: var(--status-pass);
+  background: var(--status-pass-bg);
+  border-color: #bfe0cd;
+}
+
+.status-fail {
+  color: var(--status-fail);
+  background: var(--status-fail-bg);
+  border-color: #f3c9c5;
+}
+
+.status-pending {
+  color: var(--status-pending);
+  background: var(--status-pending-bg);
+  border-color: #ecd9ad;
+}
+
+.status-superseded {
+  color: var(--status-superseded);
+  background: var(--status-superseded-bg);
+  border-color: var(--border);
+}
+
+/* ---------- Buttons and forms ---------- */
+
+button {
+  font: inherit;
+  border-radius: var(--radius);
+  border: 1px solid var(--border);
+  background: var(--bg-surface);
+  color: var(--text-primary);
+  padding: 7px 14px;
+  cursor: pointer;
+  min-height: 34px;
+}
+
+button:hover:not(:disabled) {
+  background: #f2f4f7;
+}
+
+button:active:not(:disabled) {
+  background: #e8ebef;
+}
+
+button.primary {
+  background: #1f2937;
+  border-color: #1f2937;
+  color: #fff;
+}
+
+button.primary:hover:not(:disabled) {
+  background: #2b3648;
+}
+
+button.danger {
+  border-color: #e6b6b2;
+  color: var(--status-fail);
+}
+
+button:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+button.link {
+  border: none;
+  background: none;
+  padding: 4px 0;
+  color: var(--focus);
+  text-decoration: underline;
+  min-height: 0;
+}
+
+:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 2px;
+}
+
+label {
+  display: block;
+  font-weight: 500;
+  margin-bottom: var(--space-xs);
+}
+
+input,
+select,
+textarea {
+  font: inherit;
+  width: 100%;
+  padding: 7px 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg-surface);
+  color: var(--text-primary);
+}
+
+.field {
+  margin-bottom: var(--space-md);
+}
+
+.field-hint {
+  color: var(--text-secondary);
+  font-size: 13px;
+  margin-top: var(--space-xs);
+}
+
+/* ---------- Feedback ---------- */
+
+.feedback {
+  border-radius: var(--radius);
+  padding: 10px var(--space-md);
+  border: 1px solid transparent;
+}
+
+.feedback-error {
+  background: var(--status-fail-bg);
+  border-color: #f3c9c5;
+  color: #7f1d17;
+}
+
+.feedback-ok {
+  background: var(--status-pass-bg);
+  border-color: #bfe0cd;
+  color: #0f5132;
+}
+
+.feedback-info {
+  background: var(--status-pending-bg);
+  border-color: #ecd9ad;
+  color: #6b5416;
+}
+
+/* ---------- Timeline (docs/09 §6 BatchTrailView) ---------- */
+
+.timeline {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.timeline-item {
+  position: relative;
+  padding: 0 0 var(--space-lg) 28px;
+}
+
+.timeline-item::before {
+  content: "";
+  position: absolute;
+  left: 5px;
+  top: 14px;
+  bottom: -6px;
+  width: 2px;
+  background: var(--timeline-connector);
+}
+
+.timeline-item:last-child {
+  padding-bottom: 0;
+}
+
+.timeline-item:last-child::before {
+  display: none;
+}
+
+.timeline-dot {
+  position: absolute;
+  left: 0;
+  top: 6px;
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  border: 2px solid var(--bg-surface);
+  background: var(--status-superseded);
+}
+
+.timeline-dot-pass {
+  background: var(--status-pass);
+}
+
+.timeline-dot-fail {
+  background: var(--status-fail);
+}
+
+.timeline-dot-pending {
+  background: var(--status-pending);
+}
+
+.timeline-head {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-sm);
+  flex-wrap: wrap;
+}
+
+.timeline-title {
+  font-weight: 600;
+}
+
+.kv {
+  display: grid;
+  grid-template-columns: minmax(160px, 220px) 1fr;
+  gap: var(--space-xs) var(--space-md);
+  margin-top: var(--space-sm);
+}
+
+.kv dt {
+  color: var(--text-secondary);
+}
+
+.kv dd {
+  margin: 0;
+}
+
+/* ---------- Modal ---------- */
+
+.modal-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(17, 22, 31, 0.45);
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  padding: 8vh var(--space-md);
+  z-index: 20;
+}
+
+.modal {
+  background: var(--bg-surface);
+  border-radius: 6px;
+  border: 1px solid var(--border);
+  box-shadow: 0 12px 32px rgba(15, 23, 42, 0.18);
+  width: 100%;
+  max-width: 560px;
+  padding: var(--space-lg);
+}
+
+/* ---------- Login ---------- */
+
+.login-wrap {
+  min-height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: var(--space-lg);
+}
+
+.login-card {
+  width: 100%;
+  max-width: 380px;
+  background: var(--bg-surface);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: var(--space-xl);
+}
+
+/* ---------- Misc ---------- */
+
+.tiles {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: var(--space-md);
+}
+
+.tile {
+  background: var(--bg-surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: var(--space-md);
+  text-align: left;
+  cursor: pointer;
+}
+
+.tile:hover {
+  background: #fafbfc;
+}
+
+.tile-count {
+  font-size: 24px;
+  font-weight: 600;
+}
+
+.toast {
+  position: fixed;
+  right: var(--space-lg);
+  bottom: var(--space-lg);
+  background: #1f2937;
+  color: #fff;
+  border-radius: var(--radius);
+  padding: 10px var(--space-md);
+  z-index: 30;
+}
+
+.hash {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--text-secondary);
+  word-break: break-all;
+}
+
+@media (max-width: 720px) {
+  .kv {
+    grid-template-columns: 1fr;
+  }
+
+  .page {
+    padding: var(--space-md) var(--space-sm) 48px;
+  }
+}
