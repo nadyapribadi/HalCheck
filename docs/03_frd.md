@@ -12,6 +12,8 @@
 
 - **v0.2.0:** Added Section 2a (Batch Creation) with FRD-CHAIN-BATCH-001, resolving the destination/verdict sequencing gap. Added FRD-CHAIN-VERDICT-007 (Fail verdicts must reference the specific flagged record). Added FRD-CHAIN-LEDGER-005 (corrections supersede only the flagged record, not the whole ingredient set).
 - **v0.3.0:** Made controlled-value and verdict authority chaincode-verifiable; defined fail-closed audit delivery and the canonical RBAC matrix reference.
+- **v0.4.0:** Added FRD-CHAIN-UPLOAD-010, from ADR-CT-033: a compliance fact the verdict consumes must be captured on the record at submission, and a governed reference entry that cannot supply it must not silently produce one.
+- **v0.5.0:** Added FRD-CHAIN-VERIFY-001–004, from ADR-CT-034: a reviewer must be able to check the recorded evidence without this application, its API, or an account.
 
 ## 1. Scope
 
@@ -79,6 +81,7 @@ Defines functional requirements for the Compliance Trail feature, covering batch
 | FRD-CHAIN-UPLOAD-007 | A bulk upload row whose ingredient or supplier value does not match the reference list must be rejected at that row, with a specific "not a recognized value" error, not treated as valid free text. | PRD-CT-013 | P0 |
 | FRD-CHAIN-UPLOAD-008 | Halal Risk Flag must auto-populate from the matched Ingredient Reference List entry's default classification; the submitting role may override only with an explicit, recorded reason. | PRD-CT-013 | P1 |
 | FRD-CHAIN-UPLOAD-009 | `batch` chaincode must validate Ingredient Name and Source through the on-ledger `refdata.ResolveActiveReference` contract on every submission path. Backend validation is permitted only as UX pre-validation. A value not present in the current reference list must be rejected with `reason: "not_a_recognized_value"`, regardless of how the request was constructed. | PRD-CT-013 | P0 |
+| FRD-CHAIN-UPLOAD-010 | The supplier's verification status must be captured on each ingredient record at submission (from the resolved supplier entry's own metadata), so the verdict engine evaluates the batch's own records rather than a second source that can drift from them. A supplier entry that carries no verification status must be rejected with `reason: "missing_reference_metadata"` on every submission path (`SubmitIngredient` and `CorrectIngredient` alike), writing nothing. | PRD-CT-013 | P0 |
 
 ## 7. Production Confirmation
 
@@ -117,6 +120,15 @@ Defines functional requirements for the Compliance Trail feature, covering batch
 | FRD-CHAIN-READONLY-003 | No write-affordance UI element may render for the Brand Owner role, regardless of backend enforcement. | PRD-CT-010 | P1 |
 | FRD-CHAIN-READONLY-004 | Any write attempt made under a Brand Owner identity must be rejected at the chaincode level as a defense-in-depth measure. | PRD-CT-010 | P0 |
 | FRD-CHAIN-READONLY-005 | Read-only access must include superseded/corrected records, not only current-state records. | PRD-CT-010 | P1 |
+
+## 10a. Verifiability (NEW, ADR-CT-034)
+
+| ID | Requirement | Traces to | Priority |
+|---|---|---|---|
+| FRD-CHAIN-VERIFY-001 | A batch's recorded evidence must be checkable by a party with no account in this system, no access to its API, and no Fabric client: records, the digest they produce, and the signed verdict must travel in one portable artifact. | PRD-CT-020 | P1 |
+| FRD-CHAIN-VERIFY-002 | The verdict attestation and its ECDSA signature must be retained on the immutable verdict record, and the verification key published by chaincode, so a signature can be re-verified after the fact rather than only at recording time. | PRD-CT-020 | P1 |
+| FRD-CHAIN-VERIFY-003 | The batch digest must be reproducible from the records' own stored bytes — returned verbatim, never re-serialized — so a verifier can recompute it instead of trusting a field that asserts it. | PRD-CT-020 | P1 |
+| FRD-CHAIN-VERIFY-004 | Attempting to alter a recorded fact must be shown to fail against the ledger itself: the refusal comes from the deployed chaincode, and a one-byte alteration of a record's stored bytes must be detectable from the recorded hash. No demonstration may be simulated. | PRD-CT-020 | P0 |
 
 ## 11. Remote Access
 

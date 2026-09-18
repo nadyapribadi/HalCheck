@@ -42,13 +42,13 @@ JWT_EXPIRY=8h
 DATABASE_URL=postgresql://user:password@localhost:5432/compliancetrail
 
 # File storage
-MINIO_ENDPOINT=localhost:9000
+MINIO_ENDPOINT=127.0.0.1:9000
 MINIO_ACCESS_KEY=<rotate from default>
 MINIO_SECRET_KEY=<rotate from default>
 MINIO_BUCKET=halcheck-compliance-trail-files
 
 # CORS
-ALLOWED_ORIGIN=http://localhost:5173
+ALLOWED_ORIGIN=http://localhost:5173,https://your-tunnel-url.trycloudflare.com
 
 # Reliability
 SDK_TIMEOUT_MS=10000
