@@ -31,7 +31,7 @@ Consolidated view tying every requirement across the full document set together,
 | PRD-CT-010 | Read-only trail visibility | FRD-CHAIN-READONLY-001–005 | Architecture §3 | Brand Owner screen behavior | E2E + write-attempt negative test | — |
 | PRD-CT-011 | Reachable via shareable link | FRD-CHAIN-ACCESS-001–003 | TRD §18, Architecture §13 | — | Security Matrix — Tunnel exposure | T-005, T-011, T-013 |
 | PRD-CT-012 | AI trail explanation, grounded, labeled | FRD-CHAIN-AI-001–005 | TRD §15, Architecture §4/§7 | AI Explanation Panel (Screen Req §14) | AI Evaluation Set (5 cases); Security Matrix — AI grounding, payload minimization, labeling | T-021, T-022 |
-| PRD-CT-013 | Controlled vocabulary, no free text | FRD-CHAIN-UPLOAD-006–009 | TRD §5/§7, DCG-001 | SearchableSelect (Screen Req §6), Integrity Sandbox Mode 2 | Enforcement Matrix — Controlled vocabulary bypass, Reference-data interaction | T-016, T-017 |
+| PRD-CT-013 | Controlled vocabulary, no free text | FRD-CHAIN-UPLOAD-006–010 | TRD §5/§7, DCG-001 | SearchableSelect (Screen Req §6), Integrity Sandbox Mode 2 | Enforcement Matrix — Controlled vocabulary bypass, Reference-data interaction, Reference-data completeness | T-016, T-017 |
 | PRD-CT-014 | Batch date system-populated | FRD-CHAIN-PROD-002 | Architecture §9 | Production Form (Screen Req §7) | — | — |
 | PRD-CT-015 | Fail reasons from controlled catalog | FRD-CHAIN-VERDICT-004 | TRD §10 | Verdict creation (Screen Req §8) | — | — |
 | PRD-CT-016 | System Admin role, no batch access | FRD-CHAIN-ROLE-006, ADMIN-001–003 | Architecture §3/§9 | Two-shell navigation (UI Flow §3–5) | Enforcement Matrix — System Admin boundary | T-015 |

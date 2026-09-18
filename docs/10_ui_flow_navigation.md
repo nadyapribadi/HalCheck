@@ -44,9 +44,11 @@ flowchart TD
   BatchDetail --> ProductionForm[Production Confirmation Form]
   BatchDetail --> ExportForm[Export Request Form]
   BatchDetail --> Sandbox[Integrity Sandbox]
+  BatchDetail --> Integrity[Integrity Panel - verify in the browser]
   BatchDetail --> AIPanel[AI Explanation Panel - inline]
   BatchList --> NewBatch[Start New Batch - Ingredient QA only, choose Intended Market]
   NewBatch --> IngredientUpload
+  Integrity --> Verify[Verify a Proof Bundle - public, no account]
   BatchDetail -.Fail verdict recorded.-> StatusChange[Batch status -> Awaiting Correction]
   StatusChange -.appears in.-> BatchList
 ```
@@ -71,6 +73,7 @@ Both shells share only the Login screen — after authentication, a System Admin
 | Route | Accessible to | Redirects if unauthorized |
 |---|---|---|
 | `/login` | Everyone | — |
+| `/verify` | Everyone — no session required (ADR-CT-034: verification must not need an account) | — |
 | `/batches` | 5 operational roles; filter includes `awaiting_ingredients` and `awaiting_correction` for Ingredient QA | → `/login` if session expired; → `/admin` if authenticated as System Admin |
 | `/batches/:id` | 5 operational roles | → `/batches` if batch doesn't exist |
 | `/batches/:id/ingredients` | Ingredient QA only | → `/batches/:id` with plain-text reason if wrong role |
@@ -78,6 +81,7 @@ Both shells share only the Login screen — after authentication, a System Admin
 | `/batches/:id/verdict` | Compliance Officer only | Same pattern |
 | `/batches/:id/export` | Export/Logistics Officer only | Same pattern |
 | `/batches/:id/integrity-sandbox` | All 5 operational roles | — |
+| `/batches/:id/integrity` | All 5 operational roles | — |
 | `/batches/:id/explain` | All 5 operational roles (inline on Batch Detail) | — |
 | `/admin` | System Admin only | → `/batches` if any operational role attempts it |
 | `/admin/reference-data/:type` | System Admin only | Same pattern |

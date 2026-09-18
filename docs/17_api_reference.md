@@ -5,8 +5,8 @@
 - Project: HALCHECK
 - Module: Compliance Trail
 - Repository: `halcheck`
-- Status: P4 in progress, batch lifecycle proven live end-to-end
-- Version: 0.7.0
+- Status: P4 complete (AI explanation live as an honest placeholder, pending an LLM provider/key decision). P5's MinIO file storage live-proven; cached trail views deliberately skipped (superseded by P4's `GetBatchTrail`/`ListBatches`).
+- Version: 0.12.0
 
 ## Changelog
 
@@ -16,6 +16,11 @@
 - **v0.5.0:** Replaced client-supplied `supersedesRecordId` (§5, §6) with dedicated `/ingredients/correct` and `/production/correct` endpoints that accept no such field at all -- the chaincode-level correction design (`batch.CorrectIngredient`/`CorrectProduction`, built and reviewed during P2) derives the flagged record from the batch's own latest verdict, never from client input. This doc's v0.2.0 `supersedesRecordId` field predated that design and never matched it.
 - **v0.6.0:** Corrected §4-6, §8's success response shapes to match the P4 backend implementation: every write route returns the full, RBAC-serialized record chaincode actually returns (`recordId`, `batchId`, every snapshot/reference/timestamp/identity field), not the thin `{recordId, status: "committed", txId}` summary this doc previously showed. A thin wrapper is exactly the screen-shaped response §1's resource-oriented principle rules out; the backend was built against the principle, this doc's examples were not, and the code is authoritative. `txId` (the real ledger transaction ID, captured via the Gateway SDK's fine-grained submit flow) is still present on every write response, now alongside the full record rather than instead of it. Batch creation (§4) is the one response that also carries a `status` field -- a fixed, unconditional fact about a freshly-created batch (`awaiting_ingredients`), not a general per-batch status computation; no other write route computes or returns `status`.
 - **v0.7.0:** §7 rewritten to match the real, live-proven verdict flow: `chaincode/batch` gained a read-only `GetBatchTrail` function (no chaincode function previously existed to read a batch back at all) backing both this and a new `GET /batches/:batchId/trail` (§9). The backend maps a batch's trail into the Core Screening App engine's shapes, runs it, and signs the result with the backend's own ECDSA key -- `chaincode/batch`'s compiled-in verification key was regenerated as part of this (its previous private half never left the earlier session that generated it and was never recoverable). Added `engine_dataset_mismatch` to §14.
+- **v0.8.0:** Added `GET /batches` (§9, `batch.ListBatches`), `POST /sandbox/integrity/*` (§10, live-proven -- always reject, no chaincode call), and `GET /audit-log` (§12, live-proven, System Admin only) as real, implemented endpoints. `flagged` is computed with a Postgres window function over each actor's full history (3+ `denied` outcomes in the trailing hour ending at that row's own timestamp), not just the rows a `from`/`to` filter happens to return.
+- **v0.9.0:** §5's bulk upload variant is now implemented and live-proven -- this doc's existing example shape (`uploadSessionId`, per-row `{row, status, recordId}` or `{row, status, reason, field}`) needed no correction, only a `message` alongside `reason` on rejected rows, matching every other rejection shape in this doc. Accepts CSV only (header `name,source,halalRiskFlag,overrideReason`; the last two optional) -- `file` field, `multipart/form-data`. `uploadSessionId` is a fresh backend-generated id per request, not persisted on any ledger record.
+- **v0.10.0:** §11 rewritten -- it said "System Admin only" for all three reference-data endpoints, which never matched the chaincode (only the two writes are; both reads are open to any role, same divergence already fixed for §3's endpoint summary back in P4). Added `GET /reference-data/:type/:value/history` (`refdata.GetReferenceEntryHistory`), the last P2 chaincode function that had no route -- closes `13_implementation_plan.md` P4's "all P2 chaincode functions callable through the API" exit criterion. `:entryId` corrected to `:value` throughout (the deprecate route already took `value` in the real implementation; this doc's example just hadn't been updated to match).
+- **v0.11.0:** §13's route is live as a placeholder, deliberately deferred pending an LLM provider/key decision -- always returns the documented "unavailable" response (never a fabricated answer), audited (`ai_explanation_request`), input-validated. `docs/17`'s own §7/§9/§11 corrections this session are exactly why: build the honest shape now, correct docs as reality diverges, never leave an undocumented or fabricated stand-in.
+- **v0.12.0 (P5):** §5 corrected -- `coaFileHash` was documented as client-submitted; it's chaincode-accepted (`IngredientRecord.CoaFileHash`, threaded through `SubmitIngredient`/`CorrectIngredient`, batch redeployed to sequence 5) but must be server-computed from real uploaded bytes, never a client claim (T-006). No route accepts the file yet, so it's always empty for now -- that's the one open piece, not this doc drifting from the code again. `backend/src/storage/minio.ts` implements TRD §11's object-key convention, live-proven against a real running MinIO instance (upload, retrieve, and a genuine hash-mismatch rejection) -- closes P5's "file hash verified against actual retrieved content" exit criterion. P5's other named piece, a Postgres cached-trail-view layer, is skipped: it was scoped before `GetBatchTrail`/`ListBatches` existed as a direct, fast, already-correct read path; those already solve what the cache was meant to.
 
 ## 1. Purpose
 
@@ -68,8 +73,9 @@ POST   /api/v1/batches/:batchId/explain
 POST   /api/v1/sandbox/integrity/alter-attempt
 POST   /api/v1/sandbox/integrity/unlisted-value-attempt
 GET    /api/v1/reference-data/:type
+GET    /api/v1/reference-data/:type/:value/history
 POST   /api/v1/reference-data/:type
-POST   /api/v1/reference-data/:type/:entryId/deprecate
+POST   /api/v1/reference-data/:type/:value/deprecate
 GET    /api/v1/audit-log
 ```
 
@@ -101,10 +107,11 @@ POST /api/v1/batches/:batchId/ingredients
   "name": "Aqua",
   "source": "PT Sumber Alam Nusantara",
   "halalRiskFlag": false,
-  "overrideReason": null,
-  "coaFileHash": "<sha256>"
+  "overrideReason": null
 }
 ```
+
+`coaFileHash` is deliberately not a field a client can set here. `chaincode/batch`'s `IngredientRecord.CoaFileHash` exists and is wired end-to-end (`SubmitIngredient`/`CorrectIngredient` accept it, `GetBatchTrail` returns it), but the value must be the backend's own sha256 of file bytes it actually received and stored, never a client-asserted string -- a client-supplied hash could claim any content matched it, defeating Security Threat Model T-006's mitigation entirely (`backend/src/storage/minio.ts`, object key `{batchId}/{recordType}/{sha256hash}.{ext}` per `docs/04_trd.md` §11). This route doesn't yet accept a file upload to compute one from -- that's the one piece still open; until then every submission's `coaFileHash` is empty.
 
 Correction submissions use a dedicated endpoint, not a field on this one:
 
@@ -114,10 +121,11 @@ POST /api/v1/batches/:batchId/ingredients/correct
   "name": "Aqua",
   "source": "PT Sumber Alam Nusantara",
   "halalRiskFlag": false,
-  "overrideReason": null,
-  "coaFileHash": "<sha256>"
+  "overrideReason": null
 }
 ```
+
+`coaFileHash` is deliberately not a field a client can set here. `chaincode/batch`'s `IngredientRecord.CoaFileHash` exists and is wired end-to-end (`SubmitIngredient`/`CorrectIngredient` accept it, `GetBatchTrail` returns it), but the value must be the backend's own sha256 of file bytes it actually received and stored, never a client-asserted string -- a client-supplied hash could claim any content matched it, defeating Security Threat Model T-006's mitigation entirely (`backend/src/storage/minio.ts`, object key `{batchId}/{recordType}/{sha256hash}.{ext}` per `docs/04_trd.md` §11). This route doesn't yet accept a file upload to compute one from -- that's the one piece still open; until then every submission's `coaFileHash` is empty.
 
 There is deliberately no field anywhere in either request for the client to name which record is being corrected. `batch.CorrectIngredient` derives it itself from the batch's own latest verdict (must be Fail; the flagged record must exist and not already be corrected) -- matching Screen Requirements §6 ("shows only the single flagged ... record, identified via the Fail verdict's flagged_record_id") and closing a real gap: an earlier version of this doc specified a client-supplied `supersedesRecordId`, which would have let a caller name the wrong record to correct. The chaincode-level design (reviewed and built first) is authoritative; this doc follows it.
 
@@ -132,6 +140,7 @@ Response (success) -- the full record `batch.SubmitIngredient` writes, RBAC-seri
   "sourceSnapshot": "PT Sumber Alam Nusantara",
   "supplierReferenceEntryId": "...",
   "supplierReferenceVersion": "1",
+  "supplierVerificationStatus": "verified",
   "halalRiskFlag": false,
   "timestamp": "2026-...",
   "submittedBy": { "role": "ingredient_qa", "personaName": "..." },
@@ -146,6 +155,15 @@ Response (rejected — not a recognized value), no `status` field: the HTTP stat
   "message": "not_a_recognized_value: ..."
 }
 ```
+
+Response (rejected — supplier entry carries no verification status), HTTP 400:
+```json
+{
+  "reason": "missing_reference_metadata",
+  "message": "missing_reference_metadata: supplier \"...\" has no verificationStatus in its reference metadata, ..."
+}
+```
+The submitted `source` resolves against the governed reference list, but the fact the verdict engine needs from it (`metadata.verificationStatus`, ADR-CT-033) is absent — so the record is refused rather than written with an empty status that a signed attestation would later read as unverified. Nothing is written: the batch's trail is unchanged. The remedy is a System Admin adding the status as a new version of that supplier entry, not a retry.
 
 ### Bulk upload variant
 
@@ -369,10 +387,31 @@ Always returns rejection by design:
 }
 ```
 
-## 11. Reference Data Endpoints (System Admin only)
+## 11. Reference Data Endpoints
+
+Reads are open to any authenticated role (`refdata.ListReferenceEntries`/`GetReferenceEntryHistory` carry no role check: any operational role may need to validate its own submission, or see an entry's full history, independently of the UI). Only the two writes below are System Admin only, rejecting with `reason: "role_scope_violation"` for any other caller -- an earlier version of this doc said all endpoints were System Admin only, which never matched the chaincode.
 
 ```json
 GET /api/v1/reference-data/ingredient
+```
+
+Response -- every entry of this type, active and deprecated together (deprecated ones always included, never filtered out):
+```json
+[
+  { "entryId": "...", "type": "ingredient", "value": "Aqua", "version": "1", "status": "active", "timestamp": "...", "addedBy": { "role": "system_admin", "personaName": "..." } }
+]
+```
+
+```json
+GET /api/v1/reference-data/ingredient/Aqua/history
+```
+
+Response -- every recorded write across every version of this value's full supersession chain, oldest first (FRD-CHAIN-REFDATA-004: deprecated entries must remain visible in history, not hidden):
+```json
+[
+  { "txId": "...", "timestamp": "...", "isDelete": false, "entry": { "entryId": "...", "version": "1", "status": "active", "...": "..." } },
+  { "txId": "...", "timestamp": "...", "isDelete": false, "entry": { "entryId": "...", "version": "1", "status": "deprecated", "...": "..." } }
+]
 ```
 
 ```json
@@ -383,11 +422,13 @@ POST /api/v1/reference-data/ingredient
 }
 ```
 
+System Admin only. `value` is the human-readable name a `POST .../ingredients` submission's `name`/`source` fields are validated against, not a raw ledger id.
+
 ```json
-POST /api/v1/reference-data/ingredient/:entryId/deprecate
+POST /api/v1/reference-data/ingredient/Aqua/deprecate
 ```
 
-All three endpoints reject with `reason: "role_scope_violation"` for any non-System-Admin caller.
+System Admin only. Takes the human-readable `value` in the path, not `entry_id` -- the ledger's own entry id is a raw composite key (contains NUL-byte separators, unusable as a URL segment) and unnecessary anyway, since at most one version of a `(type, value)` is ever active.
 
 ## 12. Audit Log Endpoint (System Admin only)
 
@@ -431,7 +472,12 @@ sequencing_violation
 no_valid_verdict
 immutable_record
 missing_field
+missing_reference_metadata
 identity_mismatch
+record_not_found
+no_evidence
+evidence_missing
+evidence_hash_mismatch
 not_a_recognized_value
 concurrent_modification
 ledger_unavailable
@@ -445,7 +491,9 @@ engine_dataset_mismatch
 
 Every rejection returns a stable `reason` code plus a human-readable `message`. Clients key off `reason`, never parse `message` for logic.
 
-**Added during P4 verdict integration:** `engine_dataset_mismatch` covers `POST /batches/:batchId/verdict` when a batch's own ingredient/supplier snapshot names don't resolve against the Core Screening App engine's active dataset release (`backend/src/verdict/build.ts`) -- a data-integrity gap between Compliance Trail's refdata and the engine's own dataset, not something chaincode itself can detect (it never sees the engine dataset).
+**Added during P4 verdict integration, narrowed by ADR-CT-033:** `engine_dataset_mismatch` covers `POST /batches/:batchId/verdict` when a batch's own ingredient/supplier snapshot names don't resolve against the Core Screening App engine's active dataset release (`backend/src/verdict/build.ts`). Since ADR-CT-033 the release is only consulted for records written before supplier verification status was snapshotted (2026-09-18), and only for that one fact — verdict inputs otherwise come from the batch's own records. It now means "a pre-existing record and the frozen release disagree, and nothing owns that fact any more": a data-integrity gap between Compliance Trail's ledger and the engine's own dataset that chaincode cannot detect (it never sees the engine dataset), and one no record written since this change can reach.
+
+**Added with ADR-CT-033:** `missing_reference_metadata` covers an ingredient submission (`SubmitIngredient`/`CorrectIngredient`) whose supplier reference entry carries no `verificationStatus`. It is an expected, actionable refusal on governed data, not a fault — mapped to 400 with the other business rejections (ADR-CT-031) — and it is the only reason code in this list a System Admin can create and clear on their own.
 
 **Added during P2 chaincode implementation** (`chaincode/refdata`, `chaincode/batch`): `invalid_entry_type` and `invalid_market` cover a controlled-enum parameter that doesn't match any allowed value; `duplicate_entry` covers `AddReferenceEntry` rejecting a `(type, value)` pair that already has an *active* version — re-adding a value whose existing versions are all deprecated instead succeeds as the next version (`refdata`'s versioning redesign, `docs/14_developer_setup.md` §1.7); `already_deprecated` covers `DeprecateReferenceEntry` rejecting a second deprecation of the same still-current version. None of these are reachable through the normal UI (all four fields are dropdown-constrained per `11_screen_requirements.md`), but they're real chaincode-level rejections a direct/bypassing request can trigger — the same defense-in-depth discipline the Integrity Sandbox demonstrates elsewhere.
 
@@ -459,3 +507,64 @@ Every rejection returns a stable `reason` code plus a human-readable `message`. 
 
 - HTTPS only, even for local development (self-signed cert acceptable locally).
 - No WebSocket/streaming layer in this version — all interactions are request/response; the trail view re-fetches rather than subscribing to live updates.
+
+## 17. Integrity read (ADR-CT-034)
+
+```json
+GET /api/v1/batches/:batchId/integrity
+```
+
+The raw material behind `effective_input_digest`: every ingredient and production record's own stored bytes (base64) and their sha256, in the order the digest hashed them (`ingredient records in ledger key order, then production records in ledger key order`), plus the batch's `effective_input_digest` itself. Any authenticated role — it exposes exactly what `GET /batches/:id/trail` already exposes, in a form that can be hashed. Audited as `view` / `batch.integrity`.
+
+```json
+{
+  "batchId": "SL-2026-026",
+  "algorithm": "sha256",
+  "digestOrder": "ingredient records in ledger key order, then production records in ledger key order",
+  "records": [
+    { "recordId": "c204…", "objectType": "ingredientRecord", "sha256": "68aa…", "storedBytesBase64": "eyJy…" }
+  ],
+  "effectiveInputDigest": "01a4…"
+}
+```
+
+The bytes are returned verbatim, never a re-serialization: a struct round-trip would drop fields this chaincode version doesn't know about and change the hash of a record nobody touched.
+
+## 18. Evidence retrieval (ADR-CT-034)
+
+```json
+GET /api/v1/batches/:batchId/ingredients/:recordId/coa
+```
+
+Returns the stored certificate of analysis the record's `coaFileHash` names, as the file itself (`content-type` derived from the stored object), with the ledger's own hash in the `x-evidence-sha256` header so the caller can re-check it independently. The bytes are re-hashed against that hash on **every** retrieval (`storage/minio.ts` `downloadAndVerify`) — threat model T-006's enforcement point, which had no caller until this route existed. Audited as `view` / `batch.coa`.
+
+Rejections: `record_not_found` (no such ingredient record on the batch), `no_evidence` (the record names no certificate), `evidence_missing` (the record names one, but nothing is stored under that hash), and `evidence_hash_mismatch` — HTTP 409, meaning the stored object no longer hashes to the value on the immutable record. The last one is the whole point: it is served as a refusal, not as a file.
+
+## 19. Proof bundle (ADR-CT-034)
+
+```json
+GET /api/v1/batches/:batchId/proof-bundle
+```
+
+One self-contained artifact: the integrity material from §17, every verdict that carries a stored attestation (with the attestation JSON and its ECDSA signature), and the public key the signature is checked against. Fetching it needs a session — it is this system's data — but **verifying it does not** (§20). Verdicts recorded before attestation storage existed are omitted rather than included unchecked. Audited as `view` / `batch.proof_bundle`.
+
+## 20. Independent verification (ADR-CT-034)
+
+The bundle is verified by `src/proof/verifyProofBundle.ts` — no application, no Fabric client, no network, no login. Two consumers share it:
+
+```bash
+# offline, from a file, gate-able by exit code (0 verified, 1 not, 2 unreadable)
+cd backend && npm run verify:proof -- SL-2026-026-proof-bundle.json
+```
+
+and the public `#/verify` screen, which runs the same module in the browser against a pasted or uploaded bundle (reachable from the sign-in screen; no session required, by design — the person checking someone else's claim is the person least likely to have an account).
+
+Checks, each reported `pass` / `fail` / `note`:
+
+1. every record's bytes hash to the `sha256` the bundle states;
+2. the records concatenated in order recompute to `effectiveInputDigest`;
+3. the published key parses as a P-256 SPKI key;
+4. each verdict's DER signature verifies over its attestation (SHA-256, ECDSA);
+5. each attestation names this batch;
+6. a Fail attestation's `flagged_record_id` exists among the bundle's records;
+7. — as `note`, never `fail` — whether the attested digest is the digest the records currently produce. A Fail that a correction later superseded legitimately cites an older digest; that is history, not tampering, and the signature check is what detects real tampering.

@@ -70,6 +70,7 @@ erDiagram
         string source_snapshot "denormalized, not live FK"
         string supplier_reference_entry_id
         string supplier_reference_version
+        string supplier_verification_status "denormalized snapshot of the supplier reference entry's metadata.verificationStatus, captured at submission alongside the name/source snapshots (ADR-CT-033, docs/14_developer_setup.md §1.10). Empty only on records written before 2026-09-18; a submission whose supplier entry carries no status is refused, so no new record can be written without it"
         boolean halal_risk_flag
         string override_reason "nullable, required only if flag overridden"
         string supersedes_record_id FK "NEW: nullable, set only when this record corrects a prior flagged record"
@@ -102,6 +103,8 @@ erDiagram
         string fail_reason_reference_version
         string flagged_record_id FK "NEW: nullable, points to the specific INGREDIENT_RECORD (or PRODUCTION_RECORD) that caused a Fail"
         string engine_attestation_digest
+        string engine_attestation "nullable: the exact signed payload, stored verbatim so the signature can be re-verified after the fact (ADR-CT-034, docs/14 §1.11); empty on verdicts recorded before 2026-09-18"
+        string engine_attestation_signature "nullable: base64 ASN.1 DER ECDSA over SHA-256 of engine_attestation, recomputable against the key GetAttestationPublicKey publishes"
         string engine_version
         string rules_release
         json recognition_check "nullable: issuing_body, requiring_body, recognized, as_of_date - evaluated using BATCH.intended_market"
@@ -124,7 +127,7 @@ erDiagram
         string version "starts at \"1\"; a new version may only be added once the prior version for this (type, value) is deprecated -- at most one version per value is ever active"
         string status "enum: active | deprecated"
         string superseded_by FK "nullable, self-referencing -- set by AddReferenceEntry when a new version replaces a deprecated one (P2 versioning redesign, docs/14_developer_setup.md §1.7); empty on the current active version and on any entry with no later version"
-        json metadata "type-specific, e.g. default_halal_risk for ingredient type"
+        json metadata "type-specific: default_halal_risk for ingredient type, verification_status for supplier type (the latter required since ADR-CT-033 -- see INGREDIENT_RECORD.supplier_verification_status)"
         datetime timestamp "set at creation, never changes"
         string added_by FK
         string deprecated_by FK "nullable, set only when status = deprecated -- added during P2 chaincode implementation to satisfy FRD-CHAIN-REFDATA-003's requirement that deprecation itself be recorded with its own acting identity and timestamp, which this entity's original single added_by/timestamp pair couldn't express"

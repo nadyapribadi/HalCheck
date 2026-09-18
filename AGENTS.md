@@ -31,7 +31,7 @@ cd chaincode/batch && go test ./...
 cd chaincode/refdata && go test ./...
 
 # Backend (P4 in progress — auth, gateway wrapper, RBAC serializer built
-# and tested; batch/refdata routes not yet built)
+# and tested; all P2 chaincode functions routed — see Current Work Context)
 cd backend && npm test          # vitest — against the real local Postgres
                                  # and Fabric network, not mocked (matches
                                  # docs/07_test_strategy.md §2's own
@@ -44,6 +44,35 @@ cd frontend && npm run dev
 # Full stack
 docker compose up -d
 ```
+
+## Knowledge graphs (derived, never committed)
+
+Two code-intelligence graphs are set up for this repo — full detail and caveats in
+`docs/26_knowledge_graphs.md`:
+
+```bash
+npm run graph:bootstrap   # once per fresh clone (regenerates .gitnexus/run.cjs)
+npm run graph:index       # GitNexus: symbols, call graph, execution flows, blast radius
+npm run graph:status      # is the index current with this working tree?
+npm run graph:update      # graphify: code + doc graph with community detection
+npm run graph:refresh     # both, in order
+```
+
+**When to run them:** nothing here is tied to a commit — both describe file
+content. GitNexus only needs a refresh **after** the working tree moves past
+the indexed commit (after a commit or merge); *before* committing, use its
+`detect_changes` tool on the existing index instead, which is what maps an
+uncommitted diff to affected execution flows. graphify is content-hash cached,
+so `npm run graph:update` after a change is cheap and a no-op when nothing
+moved.
+
+Both outputs (`.gitnexus/`, `graphify-out/`, plus analyse's generated `.claude/`)
+are gitignored derived artifacts — never commit them, never edit them, and
+delete either freely; a rebuild costs seconds. Always pass `--skip-agents-md`
+to `analyze` (the npm scripts do): without it, GitNexus writes into this file,
+which is hand-written. `docs/26` also records why the root graphify graph is
+~88% Go vendor code here, and the runner-identity gotcha that makes a
+freshly-built index report "stale".
 
 ## Architecture (brief — see docs/05_architecture.md for full diagrams)
 
@@ -91,9 +120,11 @@ Log, which is insert-only at the database grant level.
 
 ## Current Work Context
 
-Status: Design complete. Repo-hygiene pass accepted (`docs/19_repository_structure.md`
-§11). Core Screening App complete; Compliance Trail chaincode (P2) functionally
-complete, P3 not yet started:
+Status: Design complete. Core Screening App complete (15/15 tests). Compliance
+Trail: P0–P7 built, P4/P5 verified against the live network, and the P6
+operational shell plus P7 governance shell built in `frontend/`. P8 (AI), P9
+(tunnel), P10 (hardening) and P11 (doc consolidation) are in progress — see the
+2026-09-18 section at the end of this block for what that pass found and fixed:
 
 ### Core Screening App — functionally complete for v1 scope
 
@@ -112,7 +143,7 @@ against all 3 canonical SL-2026-00x scenarios from `docs/12`. See
 - 2-org test network up (peers, Raft orderer, 3 CAs); `compliancetrail` channel created and joined.
 - `basicgo` sample chaincode installed, approved by both orgs, and **committed** (sequence 2).
 - Sample transaction proven both directions: `InitLedger` submitted, `GetAllAssets` queried successfully.
-- **Closed (2026-08-25):** `scripts/backup-volumes.sh` retried and ran cleanly end-to-end — `alpine` pulled without issue, all three named volumes mounted, `tar` archives produced (originally blocked by transient Docker Hub unreachability; long since resolved). `halcheck_postgres-data`/`-minio-data`/`-couchdb-data` don't hold real data yet since `docker-compose.yml` is still `services: {}` (P4/P5 not started) — the auto-created empty volumes this run produced were deleted afterward as test artifacts, not real state. This was P0's one remaining exit criterion; P0 is now fully closed.
+- **Closed (2026-08-25):** `scripts/backup-volumes.sh` retried and ran cleanly end-to-end — `alpine` pulled without issue, all three named volumes mounted, `tar` archives produced (originally blocked by transient Docker Hub unreachability; long since resolved). At that date `docker-compose.yml` was still `services: {}`, so the volumes were empty and the auto-created ones were deleted as test artifacts. **Superseded (2026-09-18):** compose now defines `postgres` and `minio`, and both volumes hold real state (six seeded users, the insert-only audit log, and MinIO evidence objects), so they are no longer disposable. P0 remains fully closed.
 
 **P1 — Identity Setup, fully proven (`docs/14_developer_setup.md` §1.2):**
 - All 6 roles issued real Fabric CA identities (Org1 CA), each carrying a `role` custom attribute matching `06_erd.md`'s `IDENTITY.role` enum exactly (`ingredient_qa`, `production_qa`, `compliance_officer`, `export_officer`, `brand_owner`, `system_admin`).
@@ -276,9 +307,10 @@ doesn't exist yet — P4.
 - `scripts/backup-volumes.sh` retried and ran cleanly — `alpine` pulled,
   all three volumes mounted, `tar` archives produced. Originally blocked
   by transient Docker Hub unreachability back in P0; long since resolved,
-  just never revisited. The named volumes don't hold real data yet since
-  `docker-compose.yml` is still `services: {}` (P4/P5 not started); the
-  empty auto-created volumes this run produced were deleted afterward.
+  just never revisited. (That note described 2026-08-25, when
+  `docker-compose.yml` was still `services: {}` and the volumes were empty.
+  As of 2026-09-18 compose defines `postgres` and `minio`, both hold real
+  state, and neither volume is disposable any more.)
   **P0 is now fully closed.**
 - The full failure-lifecycle recovery arc — a batch that fails, gets
   corrected, receives a fresh Pass verdict, and successfully exports — had
@@ -293,3 +325,98 @@ doesn't exist yet — P4.
 Critical tier per `docs/18_vibe_coding_guardrails.md` §2 throughout —
 every function needs human line-by-line review before acceptance, not
 just a passing test.
+
+### 2026-09-18 — P4/P5 verified live, P6/P7 built, P10 hardening applied
+
+The environment was rebuilt (the Fabric checkout had moved from `/private/tmp`
+to `~/fabric-samples-halcheck-p0`, so `backend/.env`'s paths were updated and
+the six role identities' MSP directories gained the `config.yaml` they were
+missing). Then P4 and P5 were verified against the live network rather than
+asserted, which surfaced **five real defects, all fixed in the same pass**:
+
+1. `idempotency_keys.response_body` was `JSONB`, and Postgres rejects the
+   `\u0000` escapes in every reference-entry key — the first idempotent
+   ingredient submission killed the backend process. Now `TEXT` (ADR-CT-028).
+2. Unhandled errors in async Express 4 handlers ended the process; the shared
+   chaincode helpers, the CSV route, an error middleware and an
+   `unhandledRejection` guard now translate them into 500s instead.
+3. `no_valid_verdict` had no HTTP status mapping, so a correct refusal
+   surfaced as 500 (ADR-CT-031).
+4. The engine evaluated superseded records, so a corrected batch could never
+   clear its Fail — the flagship recovery arc was impossible through the API
+   (ADR-CT-029).
+5. `coaFileHash` was readable from the request body while the code and docs
+   both claimed it was server-computed, defeating T-006 (ADR-CT-030). The
+   ingredient routes now accept an optional file and always hash it
+   themselves.
+
+Verified live end-to-end through the API: the full lifecycle, the
+Fail → correction → Pass → export arc, reference-data add/deprecate/re-add as
+v2, field-level RBAC across all six roles, chaincode-level role rejection with
+a real non-admin identity, audit-log insert-only at the database grant level,
+and idempotent retries that never duplicate.
+
+**ADR-CT-033 implemented and proven live (2026-09-18, Critical tier).** A
+batch's ingredient records now snapshot the supplier reference entry's
+`verificationStatus` at submission (shared writer, so corrections carry it
+too), and the verdict bridge builds every evaluation input from those
+records instead of looking names up in the frozen engine dataset; the release
+keeps the rules/standards, the recognition agreements, and one fallback for
+records written before the field existed. A supplier entry with no status is
+refused at submission (`missing_reference_metadata`, 400) rather than
+recorded empty. `batch` deployed as v1.1, sequence 6, through the formal
+lifecycle. Proven live: the SL-2026-021 case (an ingredient and supplier that
+exist only on the ledger) now yields a signed Fail → correction → Pass →
+export arc, while a pre-existing record still evaluates through the release
+unchanged. The three pre-existing supplier entries had no metadata at all and
+were completed to v2 through the governed API. Suite counts: chaincode 68
+batch / 28 refdata, backend 52, Core Screening App 15. Full record:
+`docs/14_developer_setup.md` §1.10, decision: `docs/21_decisions.md`
+ADR-CT-033.
+
+`frontend/` now holds the P6 operational shell and P7 governance shell (React
++ Vite, no new dependencies, hash router): role-filtered batch list with the
+notification badge, batch detail with a connected trail, ingredient panel
+(manual, bulk CSV, correction mode), production/verdict/export modals,
+Integrity Sandbox with both modes, AI Explanation panel, reference-data
+administration and the audit-log viewer.
+
+P10 hardening applied: Postgres, MinIO and JWT secrets rotated off their
+defaults (R-004), Fabric peer/orderer/CA ports rebound to `127.0.0.1` (they
+shipped publishing on every interface), and `scripts/health-check.sh`
+rewritten — it had been checking port 3000 and a CouchDB that never existed.
+
+**Open, and honest:** ADR-CT-032 records that a backend process does not
+recover from a ledger interruption on its own and must be restarted;
+`docs/24_demo_runbook.md` carries that step and the rest of the demo
+procedure. P8 (AI), P9 (public tunnel — needs the operator's Cloudflare
+account) and the remaining P11 documentation sync are what is left.
+
+### 2026-09-18 (later) — ADR-CT-034: the ledger's guarantees are now visible and checkable
+
+A product review found that the UI showed none of what makes this system
+different from an ordinary web app, and traced it to three verifiable causes:
+the Integrity Sandbox returned canned rejections without touching the ledger,
+`storage/minio.ts`'s `downloadAndVerify` (threat T-006's enforcement point) had
+no caller anywhere, and `RecordVerdict` verified the officer's attestation
+signature and then discarded it, leaving the attestation unverifiable by
+anyone. All three are fixed: the sandbox makes real calls and reports the
+ledger's own answers; `GetBatchIntegrity` exposes each record's stored bytes,
+hashes and the batch digest for recomputation; attestation + signature are
+stored on the verdict record with `GetAttestationPublicKey` publishing the
+verification key; an evidence route gives `downloadAndVerify` its first
+caller; and `GET /batches/:id/proof-bundle` + `src/proof/verifyProofBundle.ts`
+let anyone verify a batch with **no account** — the same module behind
+`npm run verify:proof` (exit 0/1) and the public `#/verify` screen.
+
+`batch` deployed as v1.2, sequence 7. New audit event type `sandbox_attempt`
+(schema + live `ALTER TYPE`). Proven live on `SL-2026-026`: proof bundle
+verified by the CLI (7 checks, 0 failures, exit 0), one byte flipped → 2
+failures and exit 1, fetched COA re-hashing to the same value as the ledger
+record, and both sandbox modes returning the deployed contract's own
+refusals. Two integration assumptions were caught only by running live —
+contractapi returns a bare string as raw bytes, not JSON, and raw chaincode
+responses are snake_case where RBAC-serialized ones are camelCase. Suite
+counts: chaincode 73 batch / 28 refdata, backend 55, verifier 9, Core
+Screening App 15. Decision: `docs/21_decisions.md` ADR-CT-034; deploy and
+proof: `docs/14_developer_setup.md` §1.11.

@@ -119,19 +119,21 @@ Specifies field-by-field, action-by-action content for every screen in the route
 
 ## 10. Integrity Sandbox (renamed from Tamper-Evidence Sandbox)
 
-Two demonstration modes, both clearly framed as not affecting real data:
+Two demonstration modes (ADR-CT-034). Every attempt is a **real call to the deployed chaincode**, and every answer shown is the ledger's own — nothing here is a rehearsed response. Neither mode can write anything, and the screen says why: there is no update function to call, and an unlisted value is refused before it is stored.
 
 **Mode 1 — Alter a record:**
 **Fields:** Record selector (dropdown, any existing record on the current batch).
 **Actions:** Attempt Change.
-**Result:** "Rejected — this record cannot be altered. A correction may be submitted as a new record instead."
+**Result:** two lines of evidence, not one assertion — (a) the ledger's refusal, verbatim from the *deployed contract* (e.g. `Function UpdateIngredientRecord not found in contract BatchContract`), and (b) the record's hash as the ledger holds it beside the hash of the same bytes with one byte changed, which no longer match. The alteration is made in memory only; nothing is written anywhere.
 
 **Mode 2 — Submit an unlisted value (NEW):**
 **Fields:** a raw text field (deliberately bypassing `SearchableSelect`) where any ingredient/supplier name can be typed.
 **Actions:** Attempt Submit.
-**Result:** "Rejected — `not_a_recognized_value`. This confirms the backend validates against the reference list independently of the selection control, not just in the interface." Proves FRD-CHAIN-UPLOAD-009 concretely, the same way Mode 1 proves immutability.
+**Result:** the live ledger's answer on the reference list (`not_a_recognized_value`, with the value it was asked about), and — when the caller is Ingredient QA and a batch is in scope — the ledger's answer on the submission attempt itself. A value the ledger *does* recognize never reaches the submission attempt, so the mode cannot write a record even by accident. Proves FRD-CHAIN-UPLOAD-009 concretely, the same way Mode 1 proves immutability.
 
-**Framing text (both modes):** "This is a demonstration. It does not affect any real data."
+**Framing text (both modes):** "Every attempt below is a real call to the deployed chaincode, and every answer is the ledger's own. Neither mode can write anything."
+
+**Audited:** each attempt writes `sandbox_attempt` rows (`attempted`, then `allowed`/`denied`) — a deliberate attempt to break the record is exactly the event an operator needs to be able to find afterwards.
 
 ## 11. Reference Data Overview (System Admin)
 
@@ -141,7 +143,7 @@ Two demonstration modes, both clearly framed as not affecting real data:
 
 ## 12. Reference Data List (System Admin, per category)
 
-**Displayed columns:** entry name/value, status (Active/Deprecated), version/date added, added by.
+**Displayed columns:** entry name/value, status (Active/Deprecated), verification status (Suppliers only — shown as "not set" for an entry that carries none, which is the state that blocks ingredient submissions), version/date added, added by.
 
 **Deprecated entry linkage (NEW):** each deprecated entry shows "→ superseded by [entry name]" using the ERD's existing `superseded_by` field, previously stored but never surfaced.
 
@@ -150,7 +152,7 @@ Two demonstration modes, both clearly framed as not affecting real data:
 **Rule:** deprecated entries always shown, muted — never filtered out by default.
 
 ### 12.1 Add Reference Entry (modal)
-**Fields:** Entry name/value (free text — the legitimate exception, since System Admin defines the vocabulary); category-specific metadata (e.g., default Halal Risk classification for Ingredients).
+**Fields:** Entry name/value (free text — the legitimate exception, since System Admin defines the vocabulary); category-specific metadata: default Halal Risk classification for Ingredients, and Verification status (verified / unverified, dropdown, required) for Suppliers — every ingredient record sourced from a supplier snapshots that value, and the ledger refuses a submission from a supplier entry with none (`missing_reference_metadata`, ADR-CT-033).
 **Validation:** reject exact-duplicate entry names within the same category (case-insensitive) *while an active entry with that name exists*. Re-adding a name whose only existing entries are deprecated is not a duplicate — it's the next version, chained to the deprecated one it replaces.
 **Actions:** Submit, Cancel.
 
@@ -184,3 +186,21 @@ Two demonstration modes, both clearly framed as not affecting real data:
 - Language decision: all UI copy is in English.
 - No screen introduces a field not implied by an FRD requirement.
 - Intended Market, once set at batch creation, is never editable on any subsequent screen — displayed read-only wherever it appears (Batch Detail header, Export Request Form).
+
+## 16. Integrity Panel (ADR-CT-034)
+
+**Route:** `#/batches/:id/integrity`, reachable from Batch Detail by "Verify integrity". Available to every operational role — the point is that anyone can check, not that a privileged role vouches.
+
+**Displayed:** the batch's proof bundle, verified **in the browser**: per-record hash checks, the recomputed batch digest, the public key check, and each verdict's ECDSA signature check. Each check is shown as Pass / Fail / Note together with the value it compared — a Pass with no number beside it would be one more assertion.
+
+**Actions:** *Try to alter a record* — flips one byte of the first record's bytes in memory and re-runs the same checks, so the reader watches the failures appear; *Download bundle* — saves the artifact so someone else can verify it without an account; *Fetch & verify* per stored certificate — retrieves the file with the caller's own token, re-hashes it in the browser and compares against the hash on the ledger record (T-006).
+
+**Empty and partial states:** a batch with no verdict yet still shows the record and digest checks, with a `note` that no attestation is present; a verdict recorded before attestation storage existed shows the same `note` rather than being presented as checked.
+
+## 17. Verify a Proof Bundle (public, ADR-CT-034)
+
+**Route:** `#/verify` — reachable without a session and linked from the sign-in screen, because the person who needs to check someone else's claim is the person least likely to have an account here.
+
+**Fields:** a bundle JSON text area, or a file picker (`.json`); uploading verifies immediately.
+**Displayed:** the same check list as §16, under an unambiguous headline — "Verified — batch X" or "Not verified — N of M checks failed. Do not treat this bundle as evidence."
+**Behaviour:** everything runs in the browser tab; the bundle is never uploaded anywhere to be checked. The identical module backs the CLI (`npm run verify:proof -- <file>`, exit 0 verified / 1 not / 2 unreadable), so an auditor who will not trust a web page has the same check available offline.

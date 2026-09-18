@@ -261,6 +261,105 @@ RequestExport -> succeeds: destination_market "Malaysia"
 
 This is the single most narratively important user journey in the system — a batch that failed, got fixed, and shipped — and it now has a real, live, signed-attestation proof behind it, not just its component parts.
 
+### 1.10 ADR-CT-033 — compliance facts snapshotted at submission, proven live (2026-09-18)
+
+The last defect standing between the P4/P5 work and a demo: on `SL-2026-021` a System Admin added an ingredient and a supplier through the governance shell, Ingredient QA submitted them, and the Compliance Officer's verdict then failed with `ledger ingredient/supplier ("Test1"/"PT Test1") not found in the active dataset release`. The ledger had accepted both values — they were valid reference data — while the engine's vocabulary lived in a frozen JSON file. One compliance fact, two owners, and the refusal landed on the one role with no remedy. `docs/21_decisions.md` ADR-CT-033 has the decision and the alternatives; this is the deploy and proof record.
+
+**Two changes.** `chaincode/batch/batch.go`: `IngredientRecord` gained `SupplierVerificationStatus` (`omitempty` — the field's *absence* is what marks a record as pre-ADR-CT-033, which is what lets the compatibility path stay a single rule instead of a mode flag), populated in `recordIngredient` from the resolved supplier entry's `metadata.verificationStatus`, so `SubmitIngredient` and `CorrectIngredient` both carry it. A supplier entry with no such status is refused at submission with `missing_reference_metadata` (HTTP 400 — ADR-CT-031's rule, mapped in `gateway.ts`) and nothing is written; the alternative, "no metadata means unverified", would silently write a verified supplier into a signed attestation as unverified, and ADR-CT-030 already settled that a missing input to a legality-relevant field fails the submission rather than being fabricated. `backend/src/verdict/build.ts`: the evaluation targets are now assembled from each record's own snapshots (names, reference entry ids and versions, classification, supplier status) instead of being looked up in `activeDatasetRelease`; the release keeps the rules/standards, the recognition agreements, and one fallback for records written before this field existed. `src/engine/run.ts` grew `runScreeningForTargets`/`resolveTargets` — `runScreening` is now exactly those two called in sequence, so the standalone Core Screening App's behaviour is unchanged (its 15 tests pass untouched), and the bridge passes targets it assembled itself rather than fabricating a release.
+
+**Deployed through the formal lifecycle** (package → install on both peers → approve → commit), not an ad hoc redeploy: `batch` **v1.1, sequence 6** (`batch_1.1:3bdb337c74bee2b2cd4288d694fc966475e25288e64f745df99d988d501b70ea`). One environment note this surfaced, worth recording rather than tidying away: the committed definition *before* this deploy read **Version 1.0 / Sequence 5**, with five `batch_1.0` packages installed on Org1, and `refdata` at **Version 1.0 / Sequence 1** — while §1.3–§1.9 above describe these modules reaching v1.4–v1.6 through sequences 4–7. Those numbers are the pre-rebuild history (the checkout was later moved from `/private/tmp` to `~/fabric-samples-halcheck-p0`, and the modules were redeployed from scratch under the label `1.0`). The **ledger data is the original** — batches `SL-2026-001`–`021` and reference entries dated 2026-08-28 through 2026-09-18 are all still there — so the version labels and the ledger's provenance disagree; the labels below this line are the ones a `querycommitted` on this network actually prints.
+
+**One live reference-data completion was required, because the fact had no owner at all.** All three supplier entries on the ledger predated this change and carried no metadata, so after the upgrade every ingredient submission from them would have been refused. Each was deprecated and re-added as version 2 through the governed API as System Admin — `PT Sumber Alam Nusantara` → verified, `PT Distribusi Kosmetik Prima` → unverified, `PT Test1` → verified — matching what the engine dataset had been asserting on their behalf. Nothing already written was touched: records citing version 1 keep citing version 1.
+
+**Proven live, in full** (all through the API, against the real network):
+
+```text
+System Admin adds ingredient "Ekstrak Uji ADR33" (halal-risk) and supplier
+  "PT Uji ADR33" (unverified) -- neither name is in the frozen dataset release
+Ingredient QA creates SL-2026-022, submits that ingredient from that supplier
+  -> record's trail shows supplier_verification_status "unverified" (snapshot written)
+Production QA confirms production
+Compliance Officer records the verdict
+  -> Fail, fail_reason "Unverified ingredient source", flagged_record_id set,
+     digest == the trail's effective_input_digest -- a signed, decided verdict
+     for values that exist only on the ledger. Under the old bridge this was the
+     engine_dataset_mismatch 500 of SL-2026-021.
+Export Officer requests export -> rejected: no_valid_verdict (400)
+Ingredient QA corrects the flagged record to "PT Sumber Alam Nusantara" (verified)
+Compliance Officer records a fresh verdict -> Pass (digest recomputed)
+Export Officer requests export -> succeeds, destination_market "Malaysia"
+
+Paired negative test (Guardrails §2/§3):
+  supplier "PT Tanpa Status ADR33" added with no metadata at all
+  SubmitIngredient against it -> rejected: missing_reference_metadata (400)
+  the batch's trail afterwards -> no ingredient, production or verdict records
+  (the throwaway supplier was then deprecated, so it can't be picked in the UI)
+
+The ADR's own documented consequence, confirmed live on SL-2026-023:
+  Fail verdict recorded while "PT Uji ADR33" was unverified
+  System Admin then deprecates v1 and re-adds it as v2, verified
+  re-recorded verdict for the same batch -> still Fail, same digest
+    (the batch's facts were locked when they were recorded)
+  a NEW record from that supplier -> resolves version 2, snapshots "verified"
+
+Compatibility path for pre-existing records, unchanged from before:
+  SL-2026-021 (record carries no supplier status) -> verdict succeeds: Pass
+  SL-2026-003 (same, halal-risk record, release says the supplier is
+    unverified) -> verdict: Fail / "Unverified ingredient source"
+```
+
+**Caught during the deploy, not by any test:** the first `DeprecateReferenceEntry` call returned `ledger_unavailable` / "ledger call timed out" — and had in fact committed. The retry then correctly reported `already_deprecated`, which is how the timeout was identified as client-side commit-status waiting rather than a lost transaction. Worth knowing before the next live session treats that reason code as "nothing happened": with idempotency keys now used on every write route, the honest recovery is to re-read the ledger, not to assume.
+
+**Test counts after this change:** `batch` 68 test functions (7 added: the snapshot on both write paths, the paired negatives for a missing/malformed status, verbatim storage of an unrecognized value, and no-write-on-refusal), `refdata` 28 (unchanged), backend 52 (6 added in `verdict/build.test.ts` — including the decisive "the snapshot wins over a contradicting release" pair), Core Screening App 15 (unchanged, which is the point of the engine seam).
+
+**Unrelated defect found and fixed while getting to this proof:** `backend/scripts/seed-users.ts` was a bare `INSERT`, so it could only ever run once — re-running it failed on the `users.username` unique constraint *before* writing the credentials file, leaving no documented way to (re)provision or rotate the six demo logins (an environment whose database and credentials file genuinely disagreed would have needed manual SQL). It is now `ON CONFLICT (username) DO UPDATE`, which re-provisions or rotates them in place without changing their ids — nothing that references those rows (idempotency keys, audit rows) is orphaned. **It was re-run during this session**, so all six demo passwords changed: the current ones are in `backend/seeded-users.credentials.local`, and anything holding the previous set now needs that file.
+
+### 1.11 ADR-CT-034 — verifiability, proven live (2026-09-18)
+
+The complaint that produced this work was a product one: *"you can't see the blockchain contract in the web app — no wonder blockchain solutions don't sell; they look no different from an ordinary web app."* Investigating it turned up three concrete causes rather than a matter of taste, all recorded in `docs/21_decisions.md` ADR-CT-034: the Integrity Sandbox returned canned rejections without touching the ledger (its own comment said "no chaincode call"), `storage/minio.ts`'s `downloadAndVerify` — threat T-006's actual enforcement point — had no caller anywhere in the product, and `RecordVerdict` verified the officer's attestation signature and then discarded both it and the signed payload, leaving the attestation unverifiable by anyone afterwards.
+
+**Four changes**, each making a claim that already existed checkable rather than adding a new one: a sandbox that makes real calls and reports the ledger's own answers; `GetBatchIntegrity` (records' stored bytes + hashes + the batch digest, in digest order); attestation + signature stored on the verdict record, with `GetAttestationPublicKey` publishing the verification key and a route that gives `downloadAndVerify` its first caller; and a proof bundle plus `src/proof/verifyProofBundle.ts` — one module behind both the CLI (`npm run verify:proof -- <file>`, exit 0/1 for CI) and the public no-account `#/verify` screen.
+
+Deployed as `batch` **v1.2, sequence 7** through the full lifecycle. One live-only migration: the new audit event type (`sandbox_attempt`) needed `ALTER TYPE audit_event_type ADD VALUE` on the running database as well as the schema edit, because `db/init/*.sql` only runs on a container's first start (the same pattern ADR-CT-028 documented for its `ALTER TABLE`).
+
+**Proven live, in full** (batch `SL-2026-026`, everything through the API unless noted):
+
+```text
+Ingredient QA creates the batch and submits an ingredient WITH a real COA file
+  -> coaFileHash 21d10cfb… recorded on the ingredient record
+Production QA confirms production
+Compliance Officer records the verdict
+  -> status pass, engineAttestation and engineAttestationSignature both stored
+
+GET /proof-bundle -> saved to disk
+  npm run verify:proof -- bundle.json
+  -> 7 checks, 0 failures, exit 0:
+       record hashes, recomputed batch digest, P-256 key parse,
+       ECDSA signature over the attestation, batch binding, current-digest note
+
+one byte of a record flipped INSIDE the bundle file, then re-verified
+  -> "NOT VERIFIED -- 2 of 7 checks failed", exit 1
+     (the changed record no longer hashes to its stated value, and the records
+      no longer recompute to the batch's digest)
+
+GET /batches/SL-2026-026/ingredients/<recordId>/coa
+  -> 200, content-type application/pdf, x-evidence-sha256 21d10cfb…
+     the fetched bytes re-hash to 21d10cfb… — the same value the ledger record
+     carries and the same value the original file hashes to (T-006, live)
+
+Integrity Sandbox mode 1 -> "Function UpdateIngredientRecord not found in
+  contract BatchContract" (the deployed contract's own refusal) plus two
+  hashes that no longer match: 68aa6d93… (ledger) vs 495892f5… (one byte
+  changed). immutable: true — claimed only because both halves ran.
+Integrity Sandbox mode 2 -> the ledger's own not_a_recognized_value twice:
+  once resolving the reference list, once refusing the submission itself.
+  The batch's trail afterwards: still 1 ingredient, 1 production, 1 verdict.
+```
+
+**Two integration assumptions that only live running caught** (both now commented at the site): contractapi returns a bare string return as raw bytes, not JSON — `JSON.parse` on `GetAttestationPublicKey` threw and the bundle route answered 500 until it read the payload as text; and raw chaincode responses are snake_case, where `helpers.ts`'s RBAC serializer would have camelCased them — the sandbox's first live run silently found no record to hash because it looked up `recordId` in a `record_id` response.
+
+**Test counts after this change:** `batch` chaincode 73 test functions (5 added: digest recomputation, unknown-batch rejection, raw-bytes-not-a-reserialization, attestation+signature stored and still verifiable, published key equals the key actually used), `refdata` 28 (unchanged), backend 55 (3 added for the bundle builder; 52 pre-existing), Core Screening App 15 (unchanged), plus a new pure module suite of 9 for `verifyProofBundle` — including tampering a record, tampering the attestation, a signature from the wrong key, and a Fail verdict whose flagged record is absent.
+
 - macOS (Apple Silicon or Intel) — Apple Silicon is the primary validated target.
 - Docker Desktop (free for individual use).
 - Homebrew.
@@ -326,16 +425,61 @@ halcheck/
 ## 7. Chaincode Development Loop
 
 ```bash
-# Batch chaincode
+# Unit tests (no network needed -- docs/07_test_strategy.md §2's unit layer)
 cd chaincode/batch/
 go mod tidy && go build ./... && go test ./...
-../../network/network.sh deployCC -ccn batch -ccp . -ccl go
 
 # Reference-data chaincode (deployed independently)
 cd chaincode/refdata/
 go mod tidy && go build ./... && go test ./...
-../../network/network.sh deployCC -ccn refdata -ccp . -ccl go
 ```
+
+Deployment is the formal Fabric lifecycle — package, install on **both** peers, approve for both orgs, then commit (`18_vibe_coding_guardrails.md` §9.6: no ad hoc redeploy, and the version/sequence pair must advance deliberately). An earlier version of this section pointed at `../../network/network.sh deployCC`, which does not exist in this repository — `network/` holds only a README, and the chaincode was always deployed with the `peer` CLI against the running `test-network`. This is that procedure, verbatim from the last deploy (`docs/14` §1.10):
+
+```bash
+export PATH="$HOME/fabric-samples-halcheck-p0/bin:$PATH"
+export FABRIC_CFG_PATH="$HOME/fabric-samples-halcheck-p0/config"
+TN="$HOME/fabric-samples-halcheck-p0/test-network"
+CERTDIR="$TN/organizations"
+ORDERER_CA="$CERTDIR/ordererOrganizations/example.com/orderers/orderer.example.com/msp/tlscacerts/tlsca.example.com-cert.pem"
+
+# Org1 peer is the working identity for the first half of every command.
+export CORE_PEER_TLS_ENABLED=true
+export CORE_PEER_LOCALMSPID=Org1MSP
+export CORE_PEER_ADDRESS=localhost:7051
+export CORE_PEER_TLS_ROOTCERT_FILE="$CERTDIR/peerOrganizations/org1.example.com/peers/peer0.org1.example.com/tls/ca.crt"
+export CORE_PEER_MSPCONFIGPATH="$CERTDIR/peerOrganizations/org1.example.com/users/Admin@org1.example.com/msp"
+
+cd "$TN"
+# 1. Package and install. The language value is "golang" -- "go" is rejected
+#    with "unknown chaincodeType: GO".
+peer lifecycle chaincode package batch_1.1.tar.gz --path /Users/nadya/Documents/GitHub/HalCheck/chaincode/batch --lang golang --label batch_1.1
+PACKAGE_ID=$(peer lifecycle chaincode calculatepackageid batch_1.1.tar.gz)   # echo it: approve needs it verbatim
+peer lifecycle chaincode install batch_1.1.tar.gz
+
+# 2. Same package on Org2's peer.
+export CORE_PEER_LOCALMSPID=Org2MSP
+export CORE_PEER_ADDRESS=localhost:9051
+export CORE_PEER_TLS_ROOTCERT_FILE="$CERTDIR/peerOrganizations/org2.example.com/peers/peer0.org2.example.com/tls/ca.crt"
+export CORE_PEER_MSPCONFIGPATH="$CERTDIR/peerOrganizations/org2.example.com/users/Admin@org2.example.com/msp"
+peer lifecycle chaincode install batch_1.1.tar.gz
+
+# 3. Approve for both orgs (sequence must be the next one; querycommitted prints the current).
+for ORG in 1 2; do
+  if [ "$ORG" = 1 ]; then export CORE_PEER_LOCALMSPID=Org1MSP CORE_PEER_ADDRESS=localhost:7051 CORE_PEER_TLS_ROOTCERT_FILE="$CERTDIR/peerOrganizations/org1.example.com/peers/peer0.org1.example.com/tls/ca.crt" CORE_PEER_MSPCONFIGPATH="$CERTDIR/peerOrganizations/org1.example.com/users/Admin@org1.example.com/msp"
+  else export CORE_PEER_LOCALMSPID=Org2MSP CORE_PEER_ADDRESS=localhost:9051 CORE_PEER_TLS_ROOTCERT_FILE="$CERTDIR/peerOrganizations/org2.example.com/peers/peer0.org2.example.com/tls/ca.crt" CORE_PEER_MSPCONFIGPATH="$CERTDIR/peerOrganizations/org2.example.com/users/Admin@org2.example.com/msp"; fi
+  peer lifecycle chaincode approveformyorg -o localhost:7050 --ordererTLSHostnameOverride orderer.example.com --tls --cafile "$ORDERER_CA" --channelID compliancetrail --name batch --version 1.1 --package-id "$PACKAGE_ID" --sequence 6
+done
+peer lifecycle chaincode checkcommitreadiness --channelID compliancetrail --name batch --version 1.1 --sequence 6 --output json
+
+# 4. Commit, then confirm what is actually live.
+peer lifecycle chaincode commit -o localhost:7050 --ordererTLSHostnameOverride orderer.example.com --tls --cafile "$ORDERER_CA" --channelID compliancetrail --name batch --version 1.1 --sequence 6 \
+  --peerAddresses localhost:7051 --tlsRootCertFiles "$CERTDIR/peerOrganizations/org1.example.com/peers/peer0.org1.example.com/tls/ca.crt" \
+  --peerAddresses localhost:9051 --tlsRootCertFiles "$CERTDIR/peerOrganizations/org2.example.com/peers/peer0.org2.example.com/tls/ca.crt"
+peer lifecycle chaincode querycommitted -C compliancetrail -n batch
+```
+
+`refdata` follows the same four steps with `--name refdata` and its own version/sequence. After any upgrade, a **write** call may take longer than usual while the new container builds — a `ledger_unavailable` / "ledger call timed out" on the first invoke does not mean the transaction failed (docs/14 §1.10 records a deprecate that timed out client-side and had committed).
 
 ## 8. Backend API
 
@@ -355,7 +499,7 @@ FABRIC_CHAINCODE_NAME=batch
 JWT_SECRET=<rotate before any external exposure>
 JWT_EXPIRY=8h
 DATABASE_URL=postgresql://user:password@localhost:5432/compliancetrail
-MINIO_ENDPOINT=localhost:9000
+MINIO_ENDPOINT=127.0.0.1:9000
 MINIO_ACCESS_KEY=<rotate from default>
 MINIO_SECRET_KEY=<rotate from default>
 MINIO_BUCKET=halcheck-compliance-trail-files
@@ -387,10 +531,40 @@ brew install cloudflared
 cloudflared tunnel login
 cloudflared tunnel create compliancetrail-demo
 cloudflared tunnel route dns compliancetrail-demo <your-chosen-subdomain>
-cloudflared tunnel run compliancetrail-demo
+cloudflared tunnel run --config ~/.cloudflared/compliancetrail-demo.yml compliancetrail-demo
 ```
 
-Ingress config must expose only frontend and backend API ports. Run only during active demo use, not left on continuously.
+**What this is, plainly:** `cloudflared` opens an outbound connection from this laptop to Cloudflare and gives it a public HTTPS hostname, so a viewer can reach the app without any inbound port being opened on the router and without hosting anything. `tunnel login` is the one-time browser sign-in to a (free) Cloudflare account; `tunnel route dns` needs a domain already added to that account. If no domain is available, `cloudflared tunnel --url http://localhost:5173` gives a throwaway `trycloudflare.com` URL for the length of the run — fine for a live walkthrough, but the URL changes every run.
+
+The configuration file must expose **only** these two services, with a catch-all deny after them:
+
+```yaml
+# ~/.cloudflared/compliancetrail-demo.yml
+tunnel: compliancetrail-demo
+credentials-file: /Users/<you>/.cloudflared/<tunnel-id>.json
+ingress:
+  - hostname: <your-chosen-subdomain>.<your-domain>
+    service: http://localhost:5173
+  - hostname: <api-subdomain>.<your-domain>
+    service: http://localhost:3001
+  - service: http_status:404
+```
+
+**Negative-exposure test — run after every change to this file, not just once.** With the tunnel up, each of the following must fail from a network *other* than this laptop (a phone on cellular data is the easy way to be sure the connection is not looping back to localhost):
+
+```bash
+# Every one of these must NOT answer:
+curl -m 5 http://<your-chosen-subdomain>.<your-domain>:7051     # peer gRPC
+curl -m 5 http://<your-chosen-subdomain>.<your-domain>:7050     # orderer
+curl -m 5 http://<your-chosen-subdomain>.<your-domain>:7054     # Fabric CA
+curl -m 5 http://<your-chosen-subdomain>.<your-domain>:9001     # MinIO console
+curl -m 5 http://<your-chosen-subdomain>.<your-domain>:5432     # PostgreSQL
+# And these must not be routable through the tunnel at all, because the
+# catch-all ingress rule above maps every other path to 404:
+curl -m 5 https://<api-subdomain>.<your-domain>/api/v1/audit-log   # needs a System Admin token; 401/403 is correct, 200 is not
+```
+
+Run the tunnel only during active demo use, never left on continuously. `scripts/health-check.sh` confirms the loopback bindings that make this test meaningful: the Fabric peer, orderer and CAs, PostgreSQL and MinIO are all bound to `127.0.0.1` (changed during P10 — the Fabric containers shipped binding to every interface, which exposed the peer to anyone on the same network).
 
 ## 12. Dependency Scanning
 
