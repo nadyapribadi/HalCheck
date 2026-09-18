@@ -245,11 +245,44 @@ type IngredientRecord struct {
 	SourceSnapshot             string `json:"source_snapshot" metadata:"source_snapshot"`
 	SupplierReferenceEntryID   string `json:"supplier_reference_entry_id" metadata:"supplier_reference_entry_id"`
 	SupplierReferenceVersion   string `json:"supplier_reference_version" metadata:"supplier_reference_version"`
+	// SupplierVerificationStatus is the supplier reference entry's own
+	// verification status, snapshotted at submission (`verified` /
+	// `unverified` in the governed data, but stored verbatim rather than
+	// validated against a closed enum here -- refdata owns that vocabulary,
+	// and the verdict engine's own rule is "anything other than verified is
+	// not verified", so a value this module doesn't recognize can never be
+	// silently read as verified).
+	//
+	// This exists because of ADR-CT-033: the verdict engine judges
+	// unverified_ingredient_source from the batch's own records, and the
+	// signed attestation binds only those records -- a fact held outside
+	// them makes the signature attest to an incomplete input set. Same
+	// "denormalized snapshot, not a live foreign key" rule ADR-CT-024
+	// settled for standards.
+	//
+	// The struct tag is deliberately `optional`: records written before
+	// this field existed live on the ledger immutably and come back
+	// through GetBatchTrail with it empty, and a schema-required string
+	// would fail contractapi's response validation for exactly those
+	// records (the P2 incident, docs/14_developer_setup.md §1.3). The
+	// absence of the field is what marks such a record as pre-ADR-CT-033
+	// to the backend's compatibility path -- see verdict/build.ts, which
+	// is the only place allowed to know that.
+	SupplierVerificationStatus string `json:"supplier_verification_status,omitempty" metadata:"supplier_verification_status,optional"`
 	HalalRiskFlag              bool   `json:"halal_risk_flag" metadata:"halal_risk_flag"`
 	OverrideReason             string `json:"override_reason,omitempty" metadata:"override_reason,optional"`
-	SupersedesRecordID         string `json:"supersedes_record_id,omitempty" metadata:"supersedes_record_id,optional"`
-	Timestamp                  string `json:"timestamp" metadata:"timestamp"`
-	SubmittedBy                string `json:"submitted_by" metadata:"submitted_by"`
+	// CoaFileHash is the sha256 of an attached Certificate of Analysis, if
+	// one was uploaded (docs/04_trd.md §11: object key
+	// "{batchId}/{recordType}/{sha256hash}.{ext}" is derivable from this
+	// plus BatchID -- no separate lookup table needed. Recording the hash
+	// here, not just in the file store, is what makes Security Threat
+	// Model T-006's mitigation real: a swapped file is caught by
+	// re-hashing on retrieval and comparing against THIS ledger value, the
+	// one thing a file-store-side swap can't also silently rewrite.
+	CoaFileHash        string `json:"coa_file_hash,omitempty" metadata:"coa_file_hash,optional"`
+	SupersedesRecordID string `json:"supersedes_record_id,omitempty" metadata:"supersedes_record_id,optional"`
+	Timestamp          string `json:"timestamp" metadata:"timestamp"`
+	SubmittedBy        string `json:"submitted_by" metadata:"submitted_by"`
 }
 
 // resolvedReference is batch's own mirror of refdata.ReferenceEntry's JSON
@@ -268,6 +301,23 @@ type resolvedReference struct {
 
 type ingredientMetadata struct {
 	DefaultHalalRisk bool `json:"defaultHalalRisk"`
+}
+
+// supplierMetadata mirrors the supplier-typed metadata shape the governed
+// reference list uses (dataset/releases/*/suppliers.json, and what the
+// System Admin's add-entry route passes through as `metadata`).
+//
+// ADR-CT-033 makes VerificationStatus a requirement rather than an
+// optional extra: the verdict engine's unverified_ingredient_source rule
+// is decided on this value, and the signed attestation binds only the
+// batch's own records. A submission whose supplier has no answer to give
+// is therefore refused *here*, at the point the fact is captured, instead
+// of recording an empty value that would later have to be re-derived from
+// a source outside the digest (exactly the drift ADR-CT-033 removes) or
+// silently read as unverified. Same fail-closed discipline as ADR-CT-030's
+// storage_unavailable for a missing COA hash.
+type supplierMetadata struct {
+	VerificationStatus string `json:"verificationStatus"`
 }
 
 // resolveReference calls refdata.ResolveActiveReference via genuine
@@ -322,6 +372,7 @@ func (c *BatchContract) SubmitIngredient(
 	isOverride bool,
 	overrideHalalRisk bool,
 	overrideReason string,
+	coaFileHash string,
 ) (*IngredientRecord, error) {
 	if err := requireRole(ctx, "ingredient_qa"); err != nil {
 		return nil, err
@@ -331,7 +382,7 @@ func (c *BatchContract) SubmitIngredient(
 		return nil, err
 	}
 
-	return c.recordIngredient(ctx, batchID, ingredientName, source, isOverride, overrideHalalRisk, overrideReason, "")
+	return c.recordIngredient(ctx, batchID, ingredientName, source, isOverride, overrideHalalRisk, overrideReason, coaFileHash, "")
 }
 
 // CorrectIngredient submits a correction for the single ingredient record
@@ -353,6 +404,7 @@ func (c *BatchContract) CorrectIngredient(
 	isOverride bool,
 	overrideHalalRisk bool,
 	overrideReason string,
+	coaFileHash string,
 ) (*IngredientRecord, error) {
 	if err := requireRole(ctx, "ingredient_qa"); err != nil {
 		return nil, err
@@ -375,7 +427,7 @@ func (c *BatchContract) CorrectIngredient(
 		return nil, fmt.Errorf("duplicate_entry: the flagged ingredient record has already been corrected")
 	}
 
-	return c.recordIngredient(ctx, batchID, ingredientName, source, isOverride, overrideHalalRisk, overrideReason, flaggedRecordID)
+	return c.recordIngredient(ctx, batchID, ingredientName, source, isOverride, overrideHalalRisk, overrideReason, coaFileHash, flaggedRecordID)
 }
 
 // recordIngredient resolves references and writes the record shared by
@@ -391,6 +443,7 @@ func (c *BatchContract) recordIngredient(
 	isOverride bool,
 	overrideHalalRisk bool,
 	overrideReason string,
+	coaFileHash string,
 	supersedesRecordID string,
 ) (*IngredientRecord, error) {
 	ingredientRef, err := c.resolveReference(ctx, "ingredient", ingredientName)
@@ -407,6 +460,19 @@ func (c *BatchContract) recordIngredient(
 		if err := json.Unmarshal([]byte(ingredientRef.Metadata), &meta); err != nil {
 			return nil, fmt.Errorf("failed to unmarshal ingredient metadata: %w", err)
 		}
+	}
+
+	var supplierMeta supplierMetadata
+	if supplierRef.Metadata != "" {
+		if err := json.Unmarshal([]byte(supplierRef.Metadata), &supplierMeta); err != nil {
+			return nil, fmt.Errorf("failed to unmarshal supplier metadata: %w", err)
+		}
+	}
+	if supplierMeta.VerificationStatus == "" {
+		return nil, fmt.Errorf(
+			"missing_reference_metadata: supplier %q has no verificationStatus in its reference metadata, so this ingredient's compliance fact cannot be bound to the record; a System Admin must add the status as a new version of that entry first",
+			supplierRef.Value,
+		)
 	}
 
 	halalRiskFlag := meta.DefaultHalalRisk
@@ -438,8 +504,10 @@ func (c *BatchContract) recordIngredient(
 		SourceSnapshot:             supplierRef.Value,
 		SupplierReferenceEntryID:   supplierRef.EntryID,
 		SupplierReferenceVersion:   supplierRef.Version,
+		SupplierVerificationStatus: supplierMeta.VerificationStatus,
 		HalalRiskFlag:              halalRiskFlag,
 		OverrideReason:             recordedOverrideReason,
+		CoaFileHash:                coaFileHash,
 		SupersedesRecordID:         supersedesRecordID,
 		Timestamp:                  time.Unix(txTimestamp.GetSeconds(), int64(txTimestamp.GetNanos())).UTC().Format(time.RFC3339),
 		SubmittedBy:                submittedBy,
@@ -725,6 +793,16 @@ type VerdictRecord struct {
 	FailReasonReferenceVersion string            `json:"fail_reason_reference_version,omitempty" metadata:"fail_reason_reference_version,optional"`
 	FlaggedRecordID            string            `json:"flagged_record_id,omitempty" metadata:"flagged_record_id,optional"`
 	EngineAttestationDigest    string            `json:"engine_attestation_digest" metadata:"engine_attestation_digest"`
+	// EngineAttestation/EngineAttestationSignature are the signed payload and
+	// its ECDSA signature, stored verbatim (ADR-CT-034). Before this they were
+	// verified at RecordVerdict time and then discarded, which left the
+	// attestation unverifiable by anyone afterwards -- the digest alone proves
+	// what was evaluated, not who attested to it. Optional because verdicts
+	// recorded before this change have neither field, and a schema-required
+	// string would fail contractapi's response validation for exactly those
+	// records (the ADR-CT-033 lesson).
+	EngineAttestation          string            `json:"engine_attestation,omitempty" metadata:"engine_attestation,optional"`
+	EngineAttestationSignature string            `json:"engine_attestation_signature,omitempty" metadata:"engine_attestation_signature,optional"`
 	EngineVersion              string            `json:"engine_version" metadata:"engine_version"`
 	RulesRelease               string            `json:"rules_release" metadata:"rules_release"`
 	RecognitionCheck           *RecognitionCheck `json:"recognition_check,omitempty" metadata:"recognition_check,optional"`
@@ -969,6 +1047,100 @@ func unmarshalRecords[T any](ctx contractapi.TransactionContextInterface, object
 	return records, nil
 }
 
+// RecordIntegrity is one record's own stored bytes plus their hash, in the
+// exact form computeEffectiveInputDigest hashed them (ADR-CT-034).
+// StoredBytesBase64 is the value as it sits on the ledger, not a
+// re-serialization of a decoded struct -- re-marshaling would drop fields
+// this contract doesn't know about and quietly change the hash, which is
+// the precise failure this type exists to make impossible.
+//
+// The bytes are safe to hand to any role: an ingredient or production record
+// carries no admin-only fields (TRD §23.4 hides reference-entry metadata and
+// supersession administration, neither of which appears here).
+type RecordIntegrity struct {
+	RecordID       string `json:"record_id" metadata:"record_id"`
+	ObjectType     string `json:"object_type" metadata:"object_type"`
+	Sha256         string `json:"sha256" metadata:"sha256"`
+	StoredBytesB64 string `json:"stored_bytes_base64" metadata:"stored_bytes_base64"`
+}
+
+// BatchIntegrity is the raw material an independent verifier needs to
+// recompute a batch's effective_input_digest itself, instead of trusting a
+// boolean this module returns. Records are returned in digest order
+// (ingredient records in ledger key order, then production records), which
+// is the order DigestOrder states in words -- a verifier that hardcodes the
+// wrong order gets a mismatch, not a false pass.
+type BatchIntegrity struct {
+	BatchID              string             `json:"batch_id" metadata:"batch_id"`
+	Algorithm            string             `json:"algorithm" metadata:"algorithm"`
+	DigestOrder          string             `json:"digest_order" metadata:"digest_order"`
+	Records              []*RecordIntegrity `json:"records" metadata:"records"`
+	EffectiveInputDigest string             `json:"effective_input_digest" metadata:"effective_input_digest"`
+}
+
+const (
+	integrityAlgorithm   = "sha256"
+	integrityDigestOrder = "ingredient records in ledger key order, then production records in ledger key order"
+)
+
+// GetBatchIntegrity returns every ingredient and production record's stored
+// bytes and hash, plus the batch's own effective input digest, so that a
+// caller -- including one that does not trust this backend -- can recompute
+// the digest and see for itself whether they agree (ADR-CT-034, the PRD's
+// "a reviewer can independently verify tamper-evidence"). No role
+// restriction, matching GetBatchTrail: it exposes exactly the data the trail
+// already exposes, in a form that can be hashed.
+func (c *BatchContract) GetBatchIntegrity(ctx contractapi.TransactionContextInterface, batchID string) (*BatchIntegrity, error) {
+	if _, err := requireBatchExists(ctx, batchID); err != nil {
+		return nil, err
+	}
+
+	records := make([]*RecordIntegrity, 0)
+	for _, objectType := range []string{"ingredientRecord", "productionRecord"} {
+		values, err := collectRecordValues(ctx, objectType, batchID)
+		if err != nil {
+			return nil, err
+		}
+		for _, value := range values {
+			var identified struct {
+				RecordID string `json:"record_id"`
+			}
+			if err := json.Unmarshal(value, &identified); err != nil {
+				return nil, fmt.Errorf("failed to unmarshal %s: %w", objectType, err)
+			}
+			sum := sha256.Sum256(value)
+			records = append(records, &RecordIntegrity{
+				RecordID:       identified.RecordID,
+				ObjectType:     objectType,
+				Sha256:         hex.EncodeToString(sum[:]),
+				StoredBytesB64: base64.StdEncoding.EncodeToString(value),
+			})
+		}
+	}
+
+	digest, err := computeEffectiveInputDigest(ctx, batchID)
+	if err != nil {
+		return nil, err
+	}
+
+	return &BatchIntegrity{
+		BatchID:              batchID,
+		Algorithm:            integrityAlgorithm,
+		DigestOrder:          integrityDigestOrder,
+		Records:              records,
+		EffectiveInputDigest: digest,
+	}, nil
+}
+
+// GetAttestationPublicKey publishes the key every verdict attestation is
+// verified against, so a third party can check a stored signature without
+// holding this source tree (ADR-CT-034). It returns the same PEM the module
+// compiles in -- the key is public by construction; only its private half
+// lives outside this repository.
+func (c *BatchContract) GetAttestationPublicKey(ctx contractapi.TransactionContextInterface) (string, error) {
+	return verdictAttestationPublicKeyPEM, nil
+}
+
 // RecordVerdict records the compliance engine's binding Pass/Fail verdict
 // (FRD-CHAIN-VERDICT-005). Compliance Officer only
 // (FRD-CHAIN-ROLE-003). The engine's output is binding -- this function
@@ -1050,6 +1222,8 @@ func (c *BatchContract) RecordVerdict(
 		RegulationReferenceEntryID: regulationRef.EntryID,
 		RegulationReferenceVersion: regulationRef.Version,
 		EngineAttestationDigest:    att.InputDigest,
+		EngineAttestation:          attestationJSON,
+		EngineAttestationSignature: signatureBase64,
 		EngineVersion:              att.EngineVersion,
 		RulesRelease:               att.RulesRelease,
 		RecognitionCheck:           att.RecognitionCheck,
