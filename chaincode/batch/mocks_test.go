@@ -148,6 +148,17 @@ func stubResolveActiveReference(stub *mockChaincodeStub, entryType, value, entry
 	stub.invokeResponses[key] = &peer.Response{Status: 200, Payload: payload}
 }
 
+// The two supplier-metadata shapes the governed reference list uses,
+// matching dataset/releases/*/suppliers.json. Since ADR-CT-033 these are
+// load-bearing rather than decorative: batch.recordIngredient snapshots
+// verificationStatus onto the ingredient record and refuses a submission
+// whose supplier entry carries none, so every supplier stub in these tests
+// has to name it explicitly instead of passing an empty metadata string.
+const (
+	verifiedSupplier   = `{"verificationStatus":"verified"}`
+	unverifiedSupplier = `{"verificationStatus":"unverified"}`
+)
+
 // stubResolveActiveReferenceRejected configures the mock response
 // refdata.ResolveActiveReference actually returns for an unrecognized or
 // deprecated value -- the exact reason-coded message batch is expected to
