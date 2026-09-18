@@ -12,7 +12,12 @@
     "preview": "vite preview",
     "test": "vitest run",
     "test:watch": "vitest",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "graph:bootstrap": "npx -y gitnexus@latest analyze --max-file-size 1024 --skip-agents-md",
+    "graph:index": "node .gitnexus/run.cjs analyze --max-file-size 1024 --skip-agents-md",
+    "graph:status": "node .gitnexus/run.cjs status",
+    "graph:update": "graphify update .",
+    "graph:refresh": "npm run graph:index && npm run graph:update"
   },
   "dependencies": {
     "react": "^19.0.0",

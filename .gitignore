@@ -1,7 +1,15 @@
 # Secrets
 .env
 .env.local
+# A disabled-by-rename env file (see docs/25: a quick-tunnel URL that has
+# died leaves the local app unable to reach its own backend, because the
+# browser is pointed at the dead host while curl tests still pass).
+.env.local.disabled-*
 *.credentials.local
+# Derived knowledge graphs — local artifacts, never committed (docs/26).
+.gitnexus/
+graphify-out/
+.claude/
 network/wallet/
 network/crypto-config/
 network/organizations/
@@ -18,6 +26,14 @@ logs/
 postgres-data/
 couchdb-data/
 minio-data/
+
+# Compiled chaincode binaries. These sat in the chaincode source directories,
+# were committed, and were then packaged into the chaincode tarball -- which
+# is why the deployed refdata package hash looked different from a freshly
+# built one from the same source (docs/14 §1.7's investigation). They are
+# build output, not source: `go build ./...` recreates them.
+/chaincode/batch/batch
+/chaincode/refdata/refdata
 backups/
 
 # Dependencies / build output
