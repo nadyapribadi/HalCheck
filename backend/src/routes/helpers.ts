@@ -102,7 +102,17 @@ export async function handleChaincodeSubmit(req: Request, res: Response, opts: S
       res.status(503).json({ reason: "audit_unavailable", message: "audit log unavailable, request denied" });
       return;
     }
-    throw err;
+    // Anything else -- an idempotency-store failure, a storage error, an
+    // unexpected chaincode-shaped throw -- must not escape an async Express
+    // 4 handler: Express 4 does not forward rejected promises to error
+    // middleware, so an escaping throw becomes an unhandled rejection and
+    // ends the whole process. Found live during P4 verification: a JSONB
+    // idempotency column rejecting the reference-entry key's \u0000 escapes
+    // killed the backend on the first ingredient submission that carried an
+    // Idempotency-Key. The column is TEXT now, and this is the second line
+    // of defence -- one failed request never takes the service down.
+    console.error(`[${opts.module}] submit failed:`, err);
+    res.status(500).json({ reason: "internal_error", message: "request could not be completed" });
   }
 }
 
@@ -171,6 +181,7 @@ export async function handleChaincodeEvaluate(req: Request, res: Response, opts:
       res.status(503).json({ reason: "audit_unavailable", message: "audit log unavailable, request denied" });
       return;
     }
-    throw err;
+    console.error(`[${opts.module}] read failed:`, err);
+    res.status(500).json({ reason: "internal_error", message: "request could not be completed" });
   }
 }

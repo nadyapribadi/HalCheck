@@ -38,6 +38,25 @@ refdataRoutes.get("/:type", async (req, res) => {
   });
 });
 
+// FRD-CHAIN-REFDATA-004: "deprecated reference-data entries must remain
+// visible in reference-data history, not hidden." No requireRole, matching
+// GetReferenceEntryHistory's own "No role restriction, matching
+// ResolveActiveReference: this is a read" comment.
+refdataRoutes.get("/:type/:value/history", async (req, res) => {
+  const typeError = validateEntryType(req.params.type as string);
+  if (typeError) {
+    res.status(400).json({ reason: "invalid_entry_type", message: typeError });
+    return;
+  }
+  await handleChaincodeEvaluate(req, res, {
+    chaincode: "refdata",
+    fn: "GetReferenceEntryHistory",
+    args: [req.params.type as string, req.params.value as string],
+    auditEvent: "view",
+    module: "refdata.history",
+  });
+});
+
 refdataRoutes.post("/:type", requireRole("system_admin"), async (req, res) => {
   const typeError = validateEntryType(req.params.type as string);
   if (typeError) {

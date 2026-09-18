@@ -41,7 +41,12 @@ CREATE TYPE audit_event_type AS ENUM (
     'login', 'view', 'denied', 'batch_create', 'ingredient_submit',
     'ingredient_correct', 'production_confirm', 'production_correct',
     'verdict_record', 'export_request', 'reference_data_add',
-    'reference_data_deprecate', 'audit_log_view', 'ai_explanation_request'
+    'reference_data_deprecate', 'audit_log_view', 'ai_explanation_request',
+    -- ADR-CT-034: the Integrity Sandbox used to return canned rejections and
+    -- leave no trace at all. Its attempts are now real ledger calls, and a
+    -- deliberate attempt to break the record is exactly the kind of event an
+    -- operator should be able to find afterwards.
+    'sandbox_attempt'
 );
 
 CREATE TYPE audit_outcome AS ENUM ('allowed', 'denied', 'attempted');
@@ -68,7 +73,16 @@ CREATE TABLE idempotency_keys (
     idempotency_key  TEXT NOT NULL,
     route            TEXT NOT NULL,
     response_status  INTEGER NOT NULL,
-    response_body    JSONB NOT NULL,
+    -- TEXT, not JSONB: a stored submission response carries its batch's
+    -- reference-entry snapshot keys, and those keys use \u0000 as the
+    -- separator between type, value and version (chaincode/refdata
+    -- referenceEntryKey). Postgres' JSON parser rejects \u0000 outright
+    -- ("unsupported Unicode escape sequence", SQLSTATE 22P05), so a JSONB
+    -- column here made every idempotent submission that returned an
+    -- ingredient/production/verdict/export record fail. This column is an
+    -- opaque cached payload -- never queried by field -- so JSONB bought
+    -- nothing and cost correctness. Round-tripped through JSON.parse on read.
+    response_body    TEXT NOT NULL,
     created_at       TIMESTAMPTZ NOT NULL DEFAULT now(),
     PRIMARY KEY (user_id, idempotency_key)
 );

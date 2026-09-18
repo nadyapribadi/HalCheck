@@ -19,7 +19,8 @@ export type AuditEventType =
   | "reference_data_add"
   | "reference_data_deprecate"
   | "audit_log_view"
-  | "ai_explanation_request";
+  | "ai_explanation_request"
+  | "sandbox_attempt";
 
 export type AuditOutcome = "allowed" | "denied" | "attempted";
 

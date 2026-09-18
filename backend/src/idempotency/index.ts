@@ -74,10 +74,13 @@ export async function withIdempotency<T>(
       `SELECT response_status, response_body FROM idempotency_keys WHERE user_id = $1 AND idempotency_key = $2`,
       [userId, idempotencyKey],
     );
-    const row = existing.rows[0] as { response_status: number; response_body: T } | undefined;
+    // response_body is TEXT, not JSONB (db/init/001_schema.sql) -- the
+    // payloads it caches contain \u0000 separators from reference-entry
+    // keys, which Postgres' JSON parser refuses to store. Parsed back here.
+    const row = existing.rows[0] as { response_status: number; response_body: string } | undefined;
     if (!row) break; // the other attempt failed and cleaned up -- safe to try ourselves below
     if (row.response_status !== PLACEHOLDER_STATUS) {
-      return { status: row.response_status, body: row.response_body };
+      return { status: row.response_status, body: JSON.parse(row.response_body) as T };
     }
   }
 
