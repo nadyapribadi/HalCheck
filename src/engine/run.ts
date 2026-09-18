@@ -7,6 +7,7 @@ import { evaluate } from "./evaluate";
 import type {
   DatasetRelease,
   EvaluationResult,
+  EvaluationTarget,
   Finding,
   IngredientRecord,
   ScreeningProfile,
@@ -16,15 +17,38 @@ import type {
 
 export const ENGINE_VERSION = "0.1.0";
 
+// The standalone app's entry point: it has profiles and records, and the
+// dataset release is the only place its reference entries come from, so
+// resolving them is this module's job here (FRD-CORE-ENGINE-001's "the
+// caller assembles the target" — in this app, the caller and the resolver
+// are the same program).
 export function runScreening(
   profile: ScreeningProfile,
   ingredientRecords: IngredientRecord[],
   release: DatasetRelease,
 ): ScreeningRun {
+  return runScreeningForTargets(profile, resolveTargets(ingredientRecords, release), release);
+}
+
+// The same screening run, over targets the *caller* already assembled
+// (types.ts's EvaluationTarget: "assembled by the caller from an
+// IngredientRecord plus its resolved reference entries"). Added for
+// Compliance Trail's verdict bridge (ADR-CT-033): a batch's records carry
+// their own snapshots of every fact the rules consume, and the signed
+// attestation binds only those records — so the bridge must not have its
+// inputs re-derived from the dataset release behind its back. Nothing else
+// in this file changes: runScreening above is this function plus
+// resolveTargets, so the standalone app's behavior is bit-for-bit what it
+// was, and its 15 tests are unchanged.
+export function runScreeningForTargets(
+  profile: ScreeningProfile,
+  targets: EvaluationTarget[],
+  release: DatasetRelease,
+): ScreeningRun {
   const runId = crypto.randomUUID();
 
   const findings: Finding[] = release.standards.map((rule) =>
-    evaluateRule(runId, rule, profile, ingredientRecords, release),
+    evaluateRule(runId, rule, profile, targets, release),
   );
 
   const overallStatus = findings.some((f) => f.result === "fail") ? "fail" : "pass";
@@ -40,11 +64,31 @@ export function runScreening(
   };
 }
 
+// resolveTargets is the standalone app's assembly step: join each record to
+// the dataset release's own entries, and fail loudly (rather than
+// evaluating a partially-resolved record) if the release doesn't carry
+// them.
+export function resolveTargets(
+  ingredientRecords: IngredientRecord[],
+  release: DatasetRelease,
+): EvaluationTarget[] {
+  return ingredientRecords.map((record) => {
+    const ingredient = release.ingredients.find((i) => i.entryId === record.ingredientEntryId);
+    const supplier = release.suppliers.find((s) => s.entryId === record.supplierEntryId);
+    if (!ingredient || !supplier) {
+      throw new Error(
+        `Ingredient record ${record.recordId} references an entry not present in dataset release ${release.releaseId}.`,
+      );
+    }
+    return { record, ingredient, supplier };
+  });
+}
+
 function evaluateRule(
   runId: string,
   rule: StandardRule,
   profile: ScreeningProfile,
-  ingredientRecords: IngredientRecord[],
+  targets: EvaluationTarget[],
   release: DatasetRelease,
 ): Finding {
   if (rule.requirementType === "line_segregation") {
@@ -67,16 +111,7 @@ function evaluateRule(
     };
   }
 
-  const results = ingredientRecords.map((record) => {
-    const ingredient = release.ingredients.find((i) => i.entryId === record.ingredientEntryId);
-    const supplier = release.suppliers.find((s) => s.entryId === record.supplierEntryId);
-    if (!ingredient || !supplier) {
-      throw new Error(
-        `Ingredient record ${record.recordId} references an entry not present in dataset release ${release.releaseId}.`,
-      );
-    }
-    return evaluate({ record, ingredient, supplier }, rule, release.recognitionAgreements);
-  });
+  const results = targets.map((target) => evaluate(target, rule, release.recognitionAgreements));
 
   return rollUpRuleFinding(runId, rule.ruleId, results);
 }
