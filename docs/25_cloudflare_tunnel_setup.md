@@ -94,6 +94,45 @@ cd backend  && npm run dev
 cd frontend && npm run dev     # picks up .env.local at start, not on reload
 ```
 
+## 7. Quick tunnel instead (no account, no domain) — and why the old link died
+
+A quick tunnel needs no Cloudflare account, but it is **ephemeral and single-origin**:
+
+```bash
+cloudflared tunnel --url http://localhost:5173
+# prints e.g. https://<three-random-words>.trycloudflare.com
+```
+
+Two consequences that have each cost this project a broken demo link:
+
+1. **The hostname is new on every run.** It exists only while that `cloudflared`
+   process lives, and nothing about it is stable or reusable. When someone asks
+   "what is the link?", the answer is whatever the currently running process
+   printed — a link remembered from an earlier run is dead, and the hostname is
+   not recoverable from the process afterwards (it only ever went to stdout).
+   For a link that stays valid, use the named tunnel in §1-§5.
+2. **One quick tunnel serves one origin.** A named tunnel can route `/api/*` to
+   port 3001 by path (§5), but a quick tunnel cannot — so the browser must
+   reach the API through the *same* public origin. `frontend/.env.local` does
+   that with a relative base URL, and `frontend/vite.config.ts` proxies `/api`
+   to the backend:
+
+```bash
+# frontend/.env.local (gitignored)
+VITE_API_BASE_URL=/api/v1
+VITE_ALLOWED_HOSTS=.trycloudflare.com   # Vite refuses unrecognised Host headers
+```
+
+With that in place one link serves the app and the API, same-origin, and **CORS
+plays no part** in the tunnel path — which is also why `ALLOWED_ORIGIN` no
+longer needs the tunnel hostname for quick-tunnel use (it still does for the
+named-tunnel setup in §6, where the browser calls the public origin directly).
+
+Before sharing a quick-tunnel link, run the checks in §6 and in
+`docs/14_developer_setup.md` §11: the tunnel must expose the frontend (and the
+API behind it) and nothing else — Postgres, MinIO and the Fabric peers stay
+bound to `127.0.0.1` and are never routable through it.
+
 ## 7. Run it
 
 ```bash

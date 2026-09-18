@@ -22,6 +22,18 @@ export default defineConfig(({ mode }) => {
 
   return {
     plugins: [react()],
-    server: { port: 5173, strictPort: true, allowedHosts },
+    server: {
+      port: 5173,
+      strictPort: true,
+      allowedHosts,
+      // A quick tunnel (`cloudflared tunnel --url http://localhost:5173`)
+      // serves exactly ONE origin, so the browser on the public URL cannot
+      // reach the backend directly -- and `http://localhost:3001` from a
+      // remote viewer means *the viewer's* machine, not this laptop. Proxying
+      // /api through this dev server lets one public link serve both halves,
+      // same-origin, which also takes CORS out of the picture for tunnel use.
+      // (A named tunnel can route /api/* by path instead, docs/25 §5.)
+      proxy: { "/api": { target: "http://localhost:3001", changeOrigin: true } },
+    },
   };
 });

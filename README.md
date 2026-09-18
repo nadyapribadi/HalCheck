@@ -1,80 +1,142 @@
 # HALCHECK
 
-HALCHECK is a halal supply chain compliance screening project for cosmetics. Its core screening app compares BPJPH and JAKIM rules, checks a fictional supply chain against those standards, and produces sourced, step-level gap findings.
+Halal compliance screening for cosmetic contract manufacturing — with an
+accountability trail you can **check without trusting the application**.
 
-## Project Scope
+Two bounded parts, one repository:
 
-HALCHECK is organized as one product with two bounded parts:
+- **Core Screening App** — a browser-only screening workflow. It compares
+  BPJPH and JAKIM rules against a supply chain and produces sourced,
+  step-level gap findings. No login, no server, no database.
+- **Compliance Trail** — the accountability module: a local Hyperledger Fabric
+  network, six cryptographically identified roles, and a batch lifecycle
+  (ingredient → production → verdict → export) in which **every rule is
+  enforced by chaincode**, not by the UI.
 
-- **Core Screening App** — browser-only screening workflow, no login, backend, or server database in v1. Engine, local storage, and all 5 UI screens are implemented, unit-tested (15/15 passing), and manually verified against the three canonical SL-2026-00x scenarios.
-- **Compliance Trail** — accountability module that adds role-based, tamper-evident batch records through a real local Hyperledger Fabric/backend stack. Foundation phases (P0–P1.5) complete; chaincode core rules (P2) in progress.
+> All content is fictional and labelled as such. This demonstrates a
+> mechanism, not regulatory guidance, and is not a certification of anything.
 
-## Documentation
+## The part that is actually different
 
-The numbered planning suite lives in [`docs/`](docs/):
+Plenty of web apps can store a form submission. This one can hand you an
+artifact that you verify yourself, offline, with no account in the system:
 
-| Doc | Purpose |
-| --- | --- |
-| [`00_project_charter.md`](docs/00_project_charter.md) | Scope, goals, non-goals, and planning frame — Compliance Trail, plus a Core Screening App charter section |
-| [`01_prd.md`](docs/01_prd.md) | Product requirements and user journeys — Compliance Trail, plus a Core Screening App PRD section |
-| [`02_brd.md`](docs/02_brd.md) | Portfolio/business objectives and constraints |
-| [`03_frd.md`](docs/03_frd.md) | Functional requirements by subsystem — Compliance Trail, plus a Core Screening App FRD section |
-| [`04_trd.md`](docs/04_trd.md) | Technical requirements, stack, and repo structure |
-| [`05_architecture.md`](docs/05_architecture.md) | System architecture and data/runtime boundaries |
-| [`06_erd.md`](docs/06_erd.md) | Entity model and cardinality — Compliance Trail, plus the Core Screening App data model and engine output contract |
-| [`07_test_strategy.md`](docs/07_test_strategy.md) | Test layers, enforcement matrix, and release gates |
-| [`08_security_threat_model.md`](docs/08_security_threat_model.md) | Security assets, threats, mitigations, and gates |
-| [`09_ui_specification.md`](docs/09_ui_specification.md) | Visual direction, tokens, components, and interaction rules — Compliance Trail, plus a Core Screening App UI section |
-| [`10_ui_flow_navigation.md`](docs/10_ui_flow_navigation.md) | Routes, shells, and navigation behavior |
-| [`11_screen_requirements.md`](docs/11_screen_requirements.md) | Field-level screen requirements |
-| [`12_seed_data_specification.md`](docs/12_seed_data_specification.md) | Synthetic demo personas, batches, and reference data — Compliance Trail, plus the Core Screening App's dataset pipeline and synthetic BPJPH/JAKIM rule content |
-| [`13_implementation_plan.md`](docs/13_implementation_plan.md) | Build phases and milestones |
-| [`14_developer_setup.md`](docs/14_developer_setup.md) | Local setup guidance for the later build phase |
-| [`15_config_reference.md`](docs/15_config_reference.md) | Environment variables and secret rules |
-| [`16_risk_register.md`](docs/16_risk_register.md) | Risks, mitigations, and review cadence |
-| [`17_api_reference.md`](docs/17_api_reference.md) | API contract |
-| [`18_vibe_coding_guardrails.md`](docs/18_vibe_coding_guardrails.md) | AI-assisted development guardrails |
-| [`19_repository_structure.md`](docs/19_repository_structure.md) | Repository layout and git hygiene |
-| [`20_glossary.md`](docs/20_glossary.md) | Plain-language terminology |
-| [`21_decisions.md`](docs/21_decisions.md) | Accepted decision records |
-| [`22_requirements_traceability.md`](docs/22_requirements_traceability.md) | Requirement-to-test traceability |
-| [`23_roadmap.md`](docs/23_roadmap.md) | Version roadmap and deferred scope |
+```bash
+# fetch a batch's proof bundle from the running app, then check it anywhere
+npm run verify:proof -- SL-2026-026-proof-bundle.json   # in backend/
 
-Six of these documents (00, 01, 03, 06, 09, 12) cover both modules in one file: the Compliance Trail content as originally written, plus a later section specifying the Core Screening App — the actual BPJPH/JAKIM rules engine Compliance Trail wraps, which previously had no design documentation of its own.
+VERIFIED -- 7 checks, 0 failures.
+  [PASS] Record ingredientRecord c204f40abf7f… hashes to the value the bundle states
+  [PASS] The 2 records recompute to the batch's effective input digest
+  [PASS] The bundle's public key is a readable P-256 attestation key
+  [PASS] Verdict e3b03d305d68… carries a valid ECDSA attestation signature
+  [PASS] Verdict e3b03d305d68… attests to this batch
+```
 
-## Compliance Trail Progress
+Change one byte of any record inside that file and the same command reports
+`NOT VERIFIED — 2 of 7 checks failed` and exits non-zero. The verifier
+(`src/proof/verifyProofBundle.ts`) has no application imports, no Fabric
+client, no network and no login; the browser's public `#/verify` screen runs
+the same module. The Integrity Sandbox in the app makes real calls to the
+deployed chaincode and reports the ledger's own refusals — including the
+contract's own `Function UpdateIngredientRecord not found`, because no update
+function exists.
 
-| Phase | Name | Status |
+Why that matters: the verdict engine's signed attestation binds to the batch's
+own records, every compliance fact is snapshotted at submission, corrections
+are new linked records rather than edits, and reference data can only change
+through a System Admin action that is itself recorded.
+
+## Status
+
+| Phase | Scope | State |
 | --- | --- | --- |
-| P0 | Foundation + Ops Hygiene | Done |
-| P1 | Identity Setup (6 roles) | Done |
-| P1.5 | Chaincode Design Gate | Done |
-| P2 | Chaincode Core Rules | In progress |
-| P3–P11 | Backend, Frontend, AI, Hardening | Not started |
+| Core Screening App | engine, storage, 5 screens, frozen dataset releases | complete — 15 tests |
+| P0–P3 | local Fabric network, 6 role identities, `batch` + `refdata` chaincode, conformance pass | complete, deployed |
+| P4–P5 | backend API: RBAC, audit gating, idempotency, evidence storage | built and verified live |
+| P6–P7 | operational shell + governance shell (React) | built |
+| P8 | AI trail explanation | endpoint + panel exist and are grounded by construction; returns an explicit `unavailable` until a provider key is configured |
+| P9 | public tunnel | documented and proven (`docs/25`); quick-tunnel links are ephemeral by design |
+| P10–P11 | hardening, documentation sync | applied |
 
-## Repository Structure
+Test counts as of the last run: backend 67 (against a real local Postgres,
+MinIO and Fabric network), chaincode 73 `batch` + 28 `refdata`, Core Screening
+App 15, proof verifier 9. Live proofs are recorded in
+`docs/14_developer_setup.md` §1.8–§1.11.
+
+## Running it
+
+The Core Screening App needs nothing but Node:
+
+```bash
+npm install
+npm test          # 15 tests: evaluate()/rationale()/runScreening() over the
+                  # three canonical scenarios in docs/12
+npm run dev       # the screening app itself
+```
+
+The Compliance Trail needs Docker, Go and a Fabric test network (the setup is
+written out in `docs/14_developer_setup.md`):
+
+```bash
+docker compose up -d                    # Postgres + MinIO
+cd chaincode/batch && go test ./...     # 73 tests
+cd backend && npm install && npm test   # 67 tests (needs the stores above)
+cd backend && npm run dev               # API on :3001
+cd frontend && npm install && npm run dev   # app on :5173
+```
+
+Demo logins are generated locally into `backend/seeded-users.credentials.local`
+(gitignored) by `npm run seed:users`; nothing credential-bearing is committed.
+
+## Repository layout
 
 ```text
 halcheck/
-|-- src/          # core screening app — engine, storage, config, features, app
-|-- dataset/      # briefs, drafts, verified data, frozen releases
-|-- docs/         # planning and specification suite (24 docs)
-|-- public/       # static assets
+|-- src/            # Core Screening App — engine, storage, dataset loading, UI
+|-- dataset/        # briefs, drafts, verified data, frozen releases
 |-- chaincode/
-|   |-- batch/    # batch lifecycle chaincode (in progress)
-|   `-- refdata/  # reference data chaincode (add/deprecate, in progress)
-|-- backend/      # planned Compliance Trail API
-|-- frontend/     # planned Compliance Trail UI shell, if separated from src
-|-- network/      # planned local Fabric network config
-`-- README.md
+|   |-- batch/      # batch lifecycle: create, ingredient, production, verdict, export
+|   `-- refdata/    # governed reference data: add, deprecate, resolve, history
+|-- backend/        # Express API, Fabric gateway, audit log, evidence storage
+|-- frontend/       # operational shell (P6) + governance shell (P7)
+|-- db/init/        # Postgres schema, insert-only audit-log grants
+|-- docs/           # the numbered specification and decision set (27 files)
+`-- scripts/        # health check, volume backup
 ```
 
-## Runtime Principles
+## Documentation
 
-- HALCHECK Core Screening App has no login, backend, or server database in v1.
-- Compliance Trail runs on a local Hyperledger Fabric test network (2-org, Raft orderer, 3 CAs). Network and 6 role identities are proven working.
-- Chaincode modules (`batch`, `refdata`) are independently deployable on the same channel. Reference-data chaincode supports add/deprecate with no update/delete; batch chaincode is scaffolded.
-- No AI call in the verdict path.
-- Dataset releases are frozen and versioned.
-- Screening runs store the dataset version and engine version used.
-- Exports include the fixed disclaimer: screening opinion, not certification, not religious ruling.
+Documents 00–23 are the planning and specification set (charter, PRD, BRD, FRD,
+TRD, architecture, ERD, test strategy, threat model, UI specification and
+flows, screen requirements, seed data, implementation plan, developer setup,
+config reference, risk register, API reference, vibe-coding guardrails,
+repository structure, glossary, decisions, requirements traceability,
+roadmap). Six of them (00, 01, 03, 06, 09, 12) cover both parts in one file.
+
+Newer additions worth knowing:
+
+| Doc | Why it exists |
+| --- | --- |
+| [`docs/21_decisions.md`](docs/21_decisions.md) | every architectural decision, with the alternatives that were rejected and why |
+| [`docs/24_demo_runbook.md`](docs/24_demo_runbook.md) | what to show in what order, and what to do when something breaks mid-demo |
+| [`docs/25_cloudflare_tunnel_setup.md`](docs/25_cloudflare_tunnel_setup.md) | sharing the app at a public URL, and why quick-tunnel links expire |
+| [`docs/26_knowledge_graphs.md`](docs/26_knowledge_graphs.md) | the code-intelligence graphs (`npm run graph:refresh`) and when to rebuild them |
+| [`AGENTS.md`](AGENTS.md) | the working agreement for agents and humans on this repo |
+
+## Honest limitations
+
+- Local, single-operator demo. One organisation runs every node; there is no
+  multi-party hosting in this version, so the trust story is "records are
+  append-only and independently checkable", not "you can trust us".
+- A backend process does not recover from a ledger interruption on its own and
+  must be restarted (ADR-CT-032, in the runbook).
+- The AI explanation feature is deliberately not wired to a provider: with no
+  key configured it refuses rather than guessing, and it can never write.
+- Verdicts recorded before 2026-09-18 carry no stored attestation; the verifier
+  reports that as a note rather than pretending they were checked.
+- No license file yet — until one is added, the default is all rights reserved.
+
+## License
+
+Not yet chosen. If you intend to reuse this, open an issue and say so.

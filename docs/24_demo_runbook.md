@@ -7,7 +7,7 @@ How to bring the system up, what to show in what order, and what to do when some
 Run the health check first — every line must say "ok":
 
 ```bash
-cd /Users/nadya/Documents/GitHub/HalCheck
+cd "$(git rev-parse --show-toplevel)"     # this repository
 ./scripts/health-check.sh
 ```
 

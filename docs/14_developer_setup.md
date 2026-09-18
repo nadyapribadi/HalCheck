@@ -439,6 +439,7 @@ Deployment is the formal Fabric lifecycle — package, install on **both** peers
 ```bash
 export PATH="$HOME/fabric-samples-halcheck-p0/bin:$PATH"
 export FABRIC_CFG_PATH="$HOME/fabric-samples-halcheck-p0/config"
+REPO="$(git rev-parse --show-toplevel)"   # this repository — the chaincode lives here
 TN="$HOME/fabric-samples-halcheck-p0/test-network"
 CERTDIR="$TN/organizations"
 ORDERER_CA="$CERTDIR/ordererOrganizations/example.com/orderers/orderer.example.com/msp/tlscacerts/tlsca.example.com-cert.pem"
@@ -453,7 +454,7 @@ export CORE_PEER_MSPCONFIGPATH="$CERTDIR/peerOrganizations/org1.example.com/user
 cd "$TN"
 # 1. Package and install. The language value is "golang" -- "go" is rejected
 #    with "unknown chaincodeType: GO".
-peer lifecycle chaincode package batch_1.1.tar.gz --path /Users/nadya/Documents/GitHub/HalCheck/chaincode/batch --lang golang --label batch_1.1
+peer lifecycle chaincode package batch_1.1.tar.gz --path "$REPO/chaincode/batch" --lang golang --label batch_1.1
 PACKAGE_ID=$(peer lifecycle chaincode calculatepackageid batch_1.1.tar.gz)   # echo it: approve needs it verbatim
 peer lifecycle chaincode install batch_1.1.tar.gz
 
