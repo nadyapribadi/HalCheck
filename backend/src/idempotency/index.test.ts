@@ -37,6 +37,26 @@ describe("withIdempotency", () => {
     expect(handler).toHaveBeenCalledTimes(2);
   });
 
+  // Regression: every ingredient/production/verdict/export response carries
+  // its record's reference-entry snapshot key, and those keys are built with
+  // \u0000 separators (chaincode/refdata referenceEntryKey). While
+  // response_body was JSONB, Postgres rejected the \u0000 escape on write
+  // (SQLSTATE 22P05) and the failed write killed the process -- so this
+  // exact payload shape must keep round-tripping through the cache.
+  it("round-trips a response body containing NUL characters", async () => {
+    const body = {
+      recordId: "a7c5ac45",
+      ingredientReferenceEntryId: "\u0000referenceEntry\u0000ingredient\u0000Aqua\u00002\u0000",
+      ingredientReferenceVersion: "2",
+    };
+    const handler = vi.fn().mockResolvedValue({ status: 200, body });
+    const first = await withIdempotency<Record<string, unknown>>(userId, "test-nul-key", "/test", handler);
+    const second = await withIdempotency<Record<string, unknown>>(userId, "test-nul-key", "/test", handler);
+    expect(handler).toHaveBeenCalledOnce();
+    expect(first.body).toEqual(body);
+    expect(second.body).toEqual(body);
+  });
+
   it("cleans up the placeholder on failure, so a retry with the same key can succeed", async () => {
     const failingHandler = vi.fn().mockRejectedValue(new Error("simulated ledger_unavailable"));
     await expect(withIdempotency(userId, "test-failure-key", "/test", failingHandler)).rejects.toThrow();

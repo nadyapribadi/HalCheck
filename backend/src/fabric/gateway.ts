@@ -25,19 +25,20 @@ function requireEnv(name: string): string {
   return value;
 }
 
-let sharedClient: grpc.Client | undefined;
-
-// One gRPC/TLS connection to the peer, reused across every request and
-// every identity -- identity and signing happen per-call in connectAs(),
-// not here. Building this is the expensive part; connectAs() is cheap.
-async function getSharedClient(): Promise<grpc.Client> {
-  if (sharedClient) return sharedClient;
+// One gRPC/TLS connection per request, deliberately not cached across
+// requests. A process-wide cached connection was proven to go permanently
+// stale during P4 verification: after the orderer container restarted, every
+// submit kept failing with ledger_unavailable while a fresh process running
+// the identical code and config succeeded immediately -- the cached channel
+// never recovered, so a transient ledger blip became a permanent outage
+// until the backend was restarted. Locally the handshake costs milliseconds;
+// a system that must survive a blip during a live demo is worth far more.
+async function newPeerClient(): Promise<grpc.Client> {
   const tlsRootCert = await readFile(PEER_TLS_CERT_PATH);
   const credentials = grpc.credentials.createSsl(tlsRootCert);
-  sharedClient = new grpc.Client(PEER_ENDPOINT, credentials, {
+  return new grpc.Client(PEER_ENDPOINT, credentials, {
     "grpc.ssl_target_name_override": PEER_HOST_ALIAS,
   });
-  return sharedClient;
 }
 
 export type ChaincodeName = "batch" | "refdata";
@@ -96,6 +97,17 @@ function translateError(err: unknown): ChaincodeCallError {
   // gRPC UNAVAILABLE (14) / DEADLINE_EXCEEDED (4): the peer/orderer itself
   // was unreachable, not a chaincode rejection.
   if (anyErr.code === 14 || anyErr.code === 4) {
+    // Log the underlying cause: the reason code alone can't tell an operator
+    // whether the peer was down, the orderer was down, or a hostname failed
+    // to resolve -- and during a live demo that difference is the whole
+    // diagnosis. Found live: after the orderer container restarted, submits
+    // failed while queries kept working, because the orderer's advertised
+    // name (from the channel config) no longer resolved on the host.
+    console.error(
+      `[fabric] gRPC code=${anyErr.code} message=${anyErr.message ?? "(none)"} detail=${
+        anyErr.details?.[0]?.message ?? "(none)"
+      }`,
+    );
     return new ChaincodeCallError("ledger unavailable", "ledger_unavailable", 503);
   }
 
@@ -133,9 +145,26 @@ function reasonToHttpStatus(reason: string): number {
     case "duplicate_entry":
     case "already_deprecated":
     case "sequencing_violation":
+    // no_valid_verdict is a state rejection, not a server fault: the batch
+    // exists and the caller is permitted, but its *current* verdict doesn't
+    // allow the action (RequestExport with no Pass verdict, or only a stale
+    // one -- chaincode/batch.go's latest-verdict pointer rule). Found live
+    // during P4 verification: this reason had no case here, so a correct,
+    // expected rejection surfaced as HTTP 500 and would have read as "the
+    // system is broken" to any client. Grouped with the other state
+    // rejections (duplicate_entry, already_deprecated, sequencing_violation),
+    // which this project already maps to 400.
+    case "no_valid_verdict":
     case "invalid_entry_type":
     case "invalid_market":
     case "missing_field":
+    // ADR-CT-033: a supplier reference entry with no verification status
+    // cannot be the source of an ingredient record, so the submission is
+    // refused. That is a data-completeness precondition on governed
+    // reference data -- actionable by a System Admin, not a server fault --
+    // so it belongs with the other expected rejections rather than
+    // surfacing as a 500 (ADR-CT-031's rule).
+    case "missing_reference_metadata":
     case "attestation_invalid":
       return 400;
     default:
@@ -155,7 +184,7 @@ interface ConnectedGateway {
 // close() when done with this request -- cheap to open fresh per request
 // since the shared gRPC client already holds the expensive TLS connection.
 export async function connectAs(fabricIdentity: string): Promise<ConnectedGateway> {
-  const client = await getSharedClient();
+  const client = await newPeerClient();
   const identity = await loadIdentity(fabricIdentity);
   const signer = await loadSigner(fabricIdentity);
 
@@ -166,7 +195,12 @@ export async function connectAs(fabricIdentity: string): Promise<ConnectedGatewa
     gateway,
     batch: network.getContract(BATCH_CHAINCODE_NAME),
     refdata: network.getContract(REFDATA_CHAINCODE_NAME),
-    close: () => gateway.close(),
+    // The gateway doesn't own a caller-supplied client, so closing both is
+    // this function's job -- otherwise every request would leak a socket.
+    close: () => {
+      gateway.close();
+      client.close();
+    },
   };
 }
 

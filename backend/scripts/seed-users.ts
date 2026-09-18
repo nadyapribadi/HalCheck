@@ -90,9 +90,25 @@ async function main() {
     for (const persona of PERSONAS) {
       const password = randomPassword();
       const passwordHash = await bcrypt.hash(password, 12);
+      // Upsert, not a bare INSERT. As a bare INSERT this script could only
+      // ever run once: re-running it failed on the users.username unique
+      // constraint *before* writing the credentials file, so any environment
+      // where the two drifted apart (found live on 2026-09-18: a rebuilt
+      // network whose restored database held different passwords than the
+      // credentials file on disk) had no documented way back -- every login
+      // in the file was dead, and the fix was manual SQL. Re-running is now
+      // the supported way to (re)provision or rotate the six demo logins;
+      // rows keep their ids, so nothing that references them (idempotency
+      // keys, audit rows) is orphaned.
       await client.query(
         `INSERT INTO users (username, password_hash, role, persona_name, fabric_identity, fabric_cid)
-         VALUES ($1, $2, $3, $4, $5, $6)`,
+         VALUES ($1, $2, $3, $4, $5, $6)
+         ON CONFLICT (username) DO UPDATE SET
+           password_hash = EXCLUDED.password_hash,
+           role = EXCLUDED.role,
+           persona_name = EXCLUDED.persona_name,
+           fabric_identity = EXCLUDED.fabric_identity,
+           fabric_cid = EXCLUDED.fabric_cid`,
         [persona.username, passwordHash, persona.role, persona.personaName, persona.fabricIdentity, persona.fabricCid],
       );
       credentials.push(`${persona.role} (${persona.personaName}): username=${persona.username} password=${password}`);
