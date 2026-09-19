@@ -1,142 +1,192 @@
 # HALCHECK
 
-Halal compliance screening for cosmetic contract manufacturing — with an
-accountability trail you can **check without trusting the application**.
+Halal compliance screening for cosmetics, with a record that anyone can check for themselves.
 
-Two bounded parts, one repository:
+> Everything in this repository is fictional demo data. It demonstrates a
+> mechanism; it is not legal advice, not a certification, and not a claim about
+> real BPJPH or JAKIM requirements.
 
-- **Core Screening App** — a browser-only screening workflow. It compares
-  BPJPH and JAKIM rules against a supply chain and produces sourced,
-  step-level gap findings. No login, no server, no database.
-- **Compliance Trail** — the accountability module: a local Hyperledger Fabric
-  network, six cryptographically identified roles, and a batch lifecycle
-  (ingredient → production → verdict → export) in which **every rule is
-  enforced by chaincode**, not by the UI.
+---
 
-> All content is fictional and labelled as such. This demonstrates a
-> mechanism, not regulatory guidance, and is not a certification of anything.
+## The problem, in plain language
 
-## The part that is actually different
+A cosmetic product sold in Indonesia or Malaysia has to show where its
+ingredients came from and how it was produced. In contract manufacturing
+(known as *maklon*), the brand that sells the product does not own the factory
+that makes it. Ingredients get substituted, production lines get shared, and
+shipments sometimes leave before compliance has actually passed.
 
-Plenty of web apps can store a form submission. This one can hand you an
-artifact that you verify yourself, offline, with no account in the system:
+Afterwards, the only account of what happened is the one written by the people
+being checked. That leaves two separate questions:
+
+1. **Does this product meet the halal requirements of the market it is going
+   to?** - a screening question.
+2. **Who confirmed each fact, and can anyone prove the record has not been
+   changed since?** - an accountability question.
+
+HALCHECK is a working demonstration of both.
+
+## What you can actually do with it
+
+**Screen a product.** In the *Core Screening App* you enter the ingredients and
+their suppliers, choose the intended market, and the app evaluates them against
+the BPJPH (Indonesia) and JAKIM (Malaysia) rule sets. You get one finding per
+rule, each with a plain-language explanation - for example: *"Cetyl Alcohol is
+sourced from a supplier that is not on the verified list."*
+
+**Record the work, step by step.** The *Compliance Trail* is the part that
+creates an accountable history. Six roles each have their own login backed by a
+cryptographic identity, and a batch moves through them in a fixed order:
+
+| Step | Who | What gets recorded |
+|---|---|---|
+| Create the batch | Ingredient QA | the destination market, fixed at creation |
+| Add ingredients | Ingredient QA | each ingredient and supplier, as listed at that moment |
+| Confirm production | Production QA | line segregation, and the standard that applied then |
+| Record the verdict | Compliance Officer | the engine's determination, signed |
+| Release for export | Export Officer | destination copied from the batch's own record, never retyped |
+
+No step can be skipped, no role can do another role's job, and nothing can be
+edited afterwards. A correction is a **new** record that points at the one it
+replaces - the original stays exactly as it was, and the trail shows both.
+
+## The unusual part: you can verify it yourself
+
+Most software asks you to trust it. The point of this project is that it can
+hand you the evidence instead.
+
+Every batch has a **proof bundle**: a small JSON file holding the batch's
+records, a digest computed from them, the signed verdict, and the public key
+that signature can be checked against. One command checks all of it, offline,
+with no account in this system:
 
 ```bash
-# fetch a batch's proof bundle from the running app, then check it anywhere
-npm run verify:proof -- SL-2026-026-proof-bundle.json   # in backend/
+npm run verify:proof -- SL-2026-026-proof-bundle.json
 
 VERIFIED -- 7 checks, 0 failures.
-  [PASS] Record ingredientRecord c204f40abf7f… hashes to the value the bundle states
+  [PASS] Record ingredientRecord c204f40abf7f... hashes to the value the bundle states
   [PASS] The 2 records recompute to the batch's effective input digest
   [PASS] The bundle's public key is a readable P-256 attestation key
-  [PASS] Verdict e3b03d305d68… carries a valid ECDSA attestation signature
-  [PASS] Verdict e3b03d305d68… attests to this batch
+  [PASS] Verdict e3b03d305d68... carries a valid ECDSA attestation signature
 ```
 
-Change one byte of any record inside that file and the same command reports
-`NOT VERIFIED — 2 of 7 checks failed` and exits non-zero. The verifier
-(`src/proof/verifyProofBundle.ts`) has no application imports, no Fabric
-client, no network and no login; the browser's public `#/verify` screen runs
-the same module. The Integrity Sandbox in the app makes real calls to the
-deployed chaincode and reports the ledger's own refusals — including the
-contract's own `Function UpdateIngredientRecord not found`, because no update
-function exists.
+Now change **one byte** inside that file and run it again:
 
-Why that matters: the verdict engine's signed attestation binds to the batch's
-own records, every compliance fact is snapshotted at submission, corrections
-are new linked records rather than edits, and reference data can only change
-through a System Admin action that is itself recorded.
+```bash
+NOT VERIFIED -- 2 of 7 checks failed. Do not treat this bundle as evidence.
+```
 
-## Status
+That is the whole idea. Not that the software says the record is intact, but
+that a third party can prove it is - or prove it is not.
 
-| Phase | Scope | State |
-| --- | --- | --- |
-| Core Screening App | engine, storage, 5 screens, frozen dataset releases | complete — 15 tests |
-| P0–P3 | local Fabric network, 6 role identities, `batch` + `refdata` chaincode, conformance pass | complete, deployed |
-| P4–P5 | backend API: RBAC, audit gating, idempotency, evidence storage | built and verified live |
-| P6–P7 | operational shell + governance shell (React) | built |
-| P8 | AI trail explanation | endpoint + panel exist and are grounded by construction; returns an explicit `unavailable` until a provider key is configured |
-| P9 | public tunnel | documented and proven (`docs/25`); quick-tunnel links are ephemeral by design |
-| P10–P11 | hardening, documentation sync | applied |
+The app also has a public **"Verify a proof bundle"** page that performs the
+same check in your browser, and an **Integrity Sandbox** that attempts to break
+records on the live ledger and shows the ledger's own refusal - the deployed
+chaincode answering `Function UpdateIngredientRecord not found`, because there
+is no update function to call.
 
-Test counts as of the last run: backend 67 (against a real local Postgres,
-MinIO and Fabric network), chaincode 73 `batch` + 28 `refdata`, Core Screening
-App 15, proof verifier 9. Live proofs are recorded in
-`docs/14_developer_setup.md` §1.8–§1.11.
+## Try it
 
-## Running it
+**Live demo.** A quick tunnel can share the running app at a public URL:
 
-The Core Screening App needs nothing but Node:
+```bash
+cloudflared tunnel --url http://localhost:5173     # prints a public https URL
+```
+
+Quick-tunnel links are deliberately temporary - a new random hostname each run,
+valid only while that process lives - so no fixed demo URL is published here.
+For a permanent address, `docs/25_cloudflare_tunnel_setup.md` walks through the
+same setup using a Cloudflare account and your own domain.
+
+**Locally**, the screening app needs only Node:
 
 ```bash
 npm install
-npm test          # 15 tests: evaluate()/rationale()/runScreening() over the
-                  # three canonical scenarios in docs/12
-npm run dev       # the screening app itself
+npm test        # 15 tests: the engine over three canonical scenarios
+npm run dev     # the screening app
 ```
 
-The Compliance Trail needs Docker, Go and a Fabric test network (the setup is
-written out in `docs/14_developer_setup.md`):
+The full Compliance Trail also needs Docker and Go:
 
 ```bash
-docker compose up -d                    # Postgres + MinIO
-cd chaincode/batch && go test ./...     # 73 tests
-cd backend && npm install && npm test   # 67 tests (needs the stores above)
-cd backend && npm run dev               # API on :3001
-cd frontend && npm install && npm run dev   # app on :5173
+docker compose up -d                        # Postgres + MinIO
+cd chaincode/batch && go test ./...         # 73 tests
+cd backend && npm install && npm test       # 67 tests (uses the stores above)
+cd backend && npm run dev                   # API on :3001
+cd frontend && npm run dev                  # app on :5173 (deps come from the root install)
 ```
 
-Demo logins are generated locally into `backend/seeded-users.credentials.local`
-(gitignored) by `npm run seed:users`; nothing credential-bearing is committed.
+Demo logins are generated locally into a gitignored file by `npm run
+seed:users`, and the Hyperledger Fabric network is set up once by following
+`docs/14_developer_setup.md`.
 
-## Repository layout
+## What this is not
 
-```text
-halcheck/
-|-- src/            # Core Screening App — engine, storage, dataset loading, UI
-|-- dataset/        # briefs, drafts, verified data, frozen releases
-|-- chaincode/
-|   |-- batch/      # batch lifecycle: create, ingredient, production, verdict, export
-|   `-- refdata/    # governed reference data: add, deprecate, resolve, history
-|-- backend/        # Express API, Fabric gateway, audit log, evidence storage
-|-- frontend/       # operational shell (P6) + governance shell (P7)
-|-- db/init/        # Postgres schema, insert-only audit-log grants
-|-- docs/           # the numbered specification and decision set (27 files)
-`-- scripts/        # health check, volume backup
-```
+- **Not a certification.** It is a demonstration, with invented products,
+  suppliers and rules. Real halal certification is a regulatory process, not a
+  piece of software.
+- **Not production infrastructure.** It runs as a single-operator local demo:
+  one organisation operates every node. The honest claim is therefore "the
+  records are append-only and independently checkable", not "you can trust us".
+  Multi-party hosting is a non-goal of this version.
+- **Not finished.** The AI explanation feature is deliberately not connected to
+  a model provider: with no key configured it says so instead of guessing, and
+  it can never write to a record. Verdicts recorded before 18 Sep 2026 carry no
+  stored attestation, and the verifier reports that as a note rather than
+  pretending it checked them.
+
+## Under the hood
+
+For readers who want the engineering: the rules live in **chaincode**, not in
+the UI or the API - the browser and the backend are clients of the ledger, and
+a rule that exists only outside chaincode is treated as a defect. Verdicts are
+computed by a deterministic engine and recorded as an **ECDSA-signed
+attestation** bound to a digest of the batch's own records. Off-chain, the
+system audit log is insert-only at the database grant level, and every uploaded
+certificate is re-hashed against the hash stored on its immutable record each
+time it is retrieved. `docs/21_decisions.md` records each decision together
+with the alternatives that were rejected, and why.
+
+## Project status
+
+| Phase | Scope | State |
+| --- | --- | --- |
+| Core Screening App | engine, storage, 5 screens, frozen dataset releases | complete - 15 tests |
+| P0-P3 | local Fabric network, six role identities, batch + refdata chaincode, conformance pass | complete, deployed locally |
+| P4-P5 | backend API: role-based access, audit gating, idempotency, evidence storage | built and verified live |
+| P6-P7 | operational and governance shells (React) | built |
+| P8 | AI trail explanation | grounded by construction; returns an explicit `unavailable` until a model key is configured |
+| P9 | public tunnel | documented and demonstrated |
+| P10-P11 | hardening, documentation sync | applied |
+
+Last full run: backend 67 tests, chaincode 73 (batch) + 28 (refdata), Core
+Screening App 15, proof verifier 9. The live results behind the claims above are
+written up in `docs/14_developer_setup.md` sections 1.8-1.11.
 
 ## Documentation
 
-Documents 00–23 are the planning and specification set (charter, PRD, BRD, FRD,
-TRD, architecture, ERD, test strategy, threat model, UI specification and
-flows, screen requirements, seed data, implementation plan, developer setup,
-config reference, risk register, API reference, vibe-coding guardrails,
-repository structure, glossary, decisions, requirements traceability,
-roadmap). Six of them (00, 01, 03, 06, 09, 12) cover both parts in one file.
+The numbered set in [`docs/`](docs/) is the specification this system was built
+against: 27 documents, from business requirements to the threat model and the
+decision log. Six of them (00, 01, 03, 06, 09, 12) cover both parts of the
+product in one file. Start with:
 
-Newer additions worth knowing:
-
-| Doc | Why it exists |
+| Document | Why |
 | --- | --- |
-| [`docs/21_decisions.md`](docs/21_decisions.md) | every architectural decision, with the alternatives that were rejected and why |
-| [`docs/24_demo_runbook.md`](docs/24_demo_runbook.md) | what to show in what order, and what to do when something breaks mid-demo |
-| [`docs/25_cloudflare_tunnel_setup.md`](docs/25_cloudflare_tunnel_setup.md) | sharing the app at a public URL, and why quick-tunnel links expire |
-| [`docs/26_knowledge_graphs.md`](docs/26_knowledge_graphs.md) | the code-intelligence graphs (`npm run graph:refresh`) and when to rebuild them |
-| [`AGENTS.md`](AGENTS.md) | the working agreement for agents and humans on this repo |
+| [`docs/00_project_charter.md`](docs/00_project_charter.md) | what the project promises, and what it explicitly does not |
+| [`docs/03_frd.md`](docs/03_frd.md) | functional requirements, rule by rule |
+| [`docs/21_decisions.md`](docs/21_decisions.md) | every architectural decision and the alternatives rejected |
+| [`docs/24_demo_runbook.md`](docs/24_demo_runbook.md) | how to demonstrate it, and what to do when something breaks |
+| [`docs/25_cloudflare_tunnel_setup.md`](docs/25_cloudflare_tunnel_setup.md) | sharing it at a public URL |
+| [`docs/26_knowledge_graphs.md`](docs/26_knowledge_graphs.md) | the code-intelligence graphs used while working on it |
+| [`AGENTS.md`](AGENTS.md) | the working agreement for humans and AI agents on this repo |
 
-## Honest limitations
+## Security
 
-- Local, single-operator demo. One organisation runs every node; there is no
-  multi-party hosting in this version, so the trust story is "records are
-  append-only and independently checkable", not "you can trust us".
-- A backend process does not recover from a ledger interruption on its own and
-  must be restarted (ADR-CT-032, in the runbook).
-- The AI explanation feature is deliberately not wired to a provider: with no
-  key configured it refuses rather than guessing, and it can never write.
-- Verdicts recorded before 2026-09-18 carry no stored attestation; the verifier
-  reports that as a note rather than pretending they were checked.
-- No license file yet — until one is added, the default is all rights reserved.
+See [`SECURITY.md`](SECURITY.md) for how to report a vulnerability, and
+`docs/08_security_threat_model.md` for the 25 modelled threats and their
+mitigations.
 
 ## License
 
-Not yet chosen. If you intend to reuse this, open an issue and say so.
+[MIT](LICENSE) - use it, learn from it, build on it. The documentation is
+covered by the same licence.
