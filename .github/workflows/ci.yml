@@ -58,9 +58,13 @@ jobs:
         run: npx tsc --noEmit
         working-directory: backend
       - name: Unit tests that need no infrastructure
-        # proof verifier, verdict bridge, CORS parsing and the ingredient-arg
-        # tests: no database, no ledger, no network.
-        run: npx vitest run src/proof src/verdict src/http src/routes/ingredients.test.ts
+        # The proof verifier, the verdict bridge and CORS parsing: no database,
+        # no ledger, no network, and no environment at all (verified by running
+        # them with every relevant variable blanked). Deliberately excluded:
+        # routes/ingredients.test.ts, which imports the route module graph and
+        # therefore needs the JWT/MINIO/attestation-key environment that only
+        # exists on a configured machine - it runs there, in `npm test`.
+        run: npx vitest run src/proof src/verdict src/http
         working-directory: backend
 
   chaincode:
