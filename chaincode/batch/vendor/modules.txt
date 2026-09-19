@@ -26,8 +26,8 @@ github.com/hyperledger/fabric-contract-api-go/v2/internal/types
 github.com/hyperledger/fabric-contract-api-go/v2/internal/utils
 github.com/hyperledger/fabric-contract-api-go/v2/metadata
 github.com/hyperledger/fabric-contract-api-go/v2/serializer
-# github.com/hyperledger/fabric-protos-go-apiv2 v0.3.4
-## explicit; go 1.21.0
+# github.com/hyperledger/fabric-protos-go-apiv2 v0.3.7
+## explicit; go 1.22.0
 github.com/hyperledger/fabric-protos-go-apiv2/common
 github.com/hyperledger/fabric-protos-go-apiv2/ledger/queryresult
 github.com/hyperledger/fabric-protos-go-apiv2/ledger/rwset
@@ -50,7 +50,7 @@ github.com/xeipuuv/gojsonreference
 # github.com/xeipuuv/gojsonschema v1.2.0
 ## explicit
 github.com/xeipuuv/gojsonschema
-# golang.org/x/net v0.28.0
+# golang.org/x/net v0.34.0
 ## explicit; go 1.18
 golang.org/x/net/http/httpguts
 golang.org/x/net/http2
@@ -58,20 +58,20 @@ golang.org/x/net/http2/hpack
 golang.org/x/net/idna
 golang.org/x/net/internal/timeseries
 golang.org/x/net/trace
-# golang.org/x/sys v0.24.0
+# golang.org/x/sys v0.29.0
 ## explicit; go 1.18
 golang.org/x/sys/unix
 golang.org/x/sys/windows
-# golang.org/x/text v0.17.0
+# golang.org/x/text v0.21.0
 ## explicit; go 1.18
 golang.org/x/text/secure/bidirule
 golang.org/x/text/transform
 golang.org/x/text/unicode/bidi
 golang.org/x/text/unicode/norm
-# google.golang.org/genproto/googleapis/rpc v0.0.0-20240814211410-ddb44dafa142
-## explicit; go 1.21
+# google.golang.org/genproto/googleapis/rpc v0.0.0-20250115164207-1a7da9e5054f
+## explicit; go 1.22
 google.golang.org/genproto/googleapis/rpc/status
-# google.golang.org/grpc v1.67.0
+# google.golang.org/grpc v1.67.3
 ## explicit; go 1.21
 google.golang.org/grpc
 google.golang.org/grpc/attributes
