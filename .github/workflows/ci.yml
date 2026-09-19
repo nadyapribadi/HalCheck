@@ -1,0 +1,75 @@
+# Continuous integration: the checks that need no infrastructure.
+#
+# Deliberately NOT here: the backend's integration suite (it drives the real
+# local Postgres, MinIO and Fabric network, per docs/07 SS2's "conformance"
+# layer) and anything requiring the Fabric test network. Those run on the
+# operator's machine, as docs/14 describes, and a green CI run here therefore
+# does not mean the whole system was exercised - it means the parts that can
+# be checked without a ledger still pass.
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  screening-app:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+      # The root install provides the frontend's dependencies too: the
+      # frontend declares none of its own, by design (see README "Try it").
+      - run: npm ci
+      - name: Screening engine and storage tests
+        run: npx vitest run src/engine/__tests__/screening.test.ts src/storage/__tests__/screeningStateStore.test.ts
+      - name: Typecheck (app + engine)
+        run: npx tsc --noEmit
+      - name: Typecheck frontend
+        run: cd frontend && npx tsc --noEmit
+      - name: Build frontend
+        run: cd frontend && npx vite build
+
+  backend:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: backend/package-lock.json
+      - run: npm ci
+        working-directory: backend
+      - name: Typecheck
+        run: npx tsc --noEmit
+        working-directory: backend
+      - name: Unit tests that need no infrastructure
+        # proof verifier, verdict bridge, CORS parsing and the ingredient-arg
+        # tests: no database, no ledger, no network.
+        run: npx vitest run src/proof src/verdict src/http src/routes/ingredients.test.ts
+        working-directory: backend
+
+  chaincode:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.25"
+          cache-dependency-path: |
+            chaincode/batch/go.sum
+            chaincode/refdata/go.sum
+      - name: batch chaincode
+        run: go test ./...
+        working-directory: chaincode/batch
+      - name: refdata chaincode
+        run: go test ./...
+        working-directory: chaincode/refdata
