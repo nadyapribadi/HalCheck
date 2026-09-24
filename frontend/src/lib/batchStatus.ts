@@ -53,7 +53,11 @@ export interface VerdictRecord {
   engineAttestationDigest?: string;
   engineVersion?: string;
   rulesRelease?: string;
-  failReason?: string;
+  // The API field is `failReasonSnapshot` -- chaincode's fail_reason_snapshot,
+  // camelCased by the RBAC serializer. Reading `failReason` here meant the
+  // trail view rendered "—" for every Fail verdict's reason, which a screenshot
+  // caught and no test did: nothing asserted what the UI displays.
+  failReasonSnapshot?: string;
   flaggedRecordId?: string;
   recognitionCheck?: {
     issuingBody: string;

@@ -124,7 +124,7 @@ export function BatchTrailView({ trail }: { trail: BatchTrail }): React.ReactEle
                     <dt>Flagged record</dt>
                     <dd className="mono">{block.record.flaggedRecordId ?? "—"}</dd>
                     <dt>Fail reason</dt>
-                    <dd>{block.record.failReason ?? "—"}</dd>
+                    <dd>{block.record.failReasonSnapshot ?? "—"}</dd>
                   </>
                 ) : null}
                 <dt>Engine</dt>
