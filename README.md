@@ -119,7 +119,24 @@ npm test        # 15 tests: the engine over three canonical scenarios
 npm run dev     # the screening app
 ```
 
-The full Compliance Trail also needs Docker and Go:
+### Run the whole thing yourself
+
+Wanted: six roles, a real ledger, and no shared passwords. One script brings up
+the Fabric network, issues the six role identities, generates the attestation
+keypair and seeds your own local logins — then prints the login table:
+
+```bash
+./scripts/bootstrap-demo.sh --check    # what is installed, what is missing
+./scripts/bootstrap-demo.sh            # do it, phase by phase (~15-20 min)
+```
+
+It needs Docker, Go and Node, and roughly 8 GB of RAM free for the eleven
+containers. Chaincode deployment stays a documented manual step on purpose
+(`docs/14` §7), and `docs/27_running_it_yourself.md` explains what each
+container is, why none of them are in this repository, and how the two-layer
+login (Fabric identity + app account) works.
+
+Or by hand — the same parts, one command at a time:
 
 ```bash
 docker compose up -d                        # Postgres + MinIO
