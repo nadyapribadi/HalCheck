@@ -1,11 +1,5 @@
 [
   { "entryId": "ing-aqua", "name": "Aqua", "defaultHalalRisk": false },
-  {
-    "entryId": "ing-test1",
-    "name": "Test1",
-    "defaultHalalRisk": false,
-    "riskNote": "Added 2026-09-18 to re-align the engine dataset with a value the System Admin had already added to ledger reference data."
-  },
   { "entryId": "ing-glycerin", "name": "Glycerin", "defaultHalalRisk": false },
   { "entryId": "ing-niacinamide", "name": "Niacinamide", "defaultHalalRisk": false },
   { "entryId": "ing-centella-asiatica-extract", "name": "Centella Asiatica Extract", "defaultHalalRisk": false },

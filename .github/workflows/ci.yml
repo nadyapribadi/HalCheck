@@ -29,7 +29,7 @@ jobs:
       # frontend declares none of its own, by design (see README "Try it").
       - run: npm ci
       - name: Screening engine and storage tests
-        run: npx vitest run src/engine/__tests__/screening.test.ts src/storage/__tests__/screeningStateStore.test.ts
+        run: npx vitest run src/engine/__tests__/screening.test.ts src/storage/__tests__/screeningStateStore.test.ts src/data/__tests__/datasetVocabulary.test.ts
       - name: Typecheck (app + engine)
         run: npx tsc --noEmit
       - name: Typecheck frontend

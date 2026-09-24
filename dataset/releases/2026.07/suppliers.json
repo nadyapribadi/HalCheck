@@ -1,6 +1,5 @@
 [
   { "entryId": "sup-pt-sumber-alam-nusantara", "name": "PT Sumber Alam Nusantara", "verificationStatus": "verified" },
-  { "entryId": "sup-pt-test1", "name": "PT Test1", "verificationStatus": "verified" },
   { "entryId": "sup-pt-kimia-hijau-indonesia", "name": "PT Kimia Hijau Indonesia", "verificationStatus": "verified" },
   { "entryId": "sup-cv-bahan-baku-sejahtera", "name": "CV Bahan Baku Sejahtera", "verificationStatus": "verified" },
   { "entryId": "sup-pt-distribusi-kosmetik-prima", "name": "PT Distribusi Kosmetik Prima", "verificationStatus": "unverified" }
