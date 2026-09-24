@@ -1,0 +1,10 @@
+{
+  "purpose": "Compatibility data for ingredient records written before 2026-09-18.",
+  "why": "ADR-CT-033 moved ownership of a supplier's verification status onto the ledger record itself, so the verdict engine evaluates the batch's own facts instead of a frozen file. Records written before that change carry no snapshot, and the verdict bridge reads the supplier's status from here instead. This is NOT the release's screening vocabulary: it is a frozen copy of what the governed reference list said on the day the snapshot rule took effect, kept only so those older records remain evaluable.",
+  "deleteWhen": "No pre-2026-09-18 ingredient records remain that anyone needs to evaluate. It is one file: deleting it and its two consumers (src/data/loadDatasetRelease.ts, backend/src/verdict/build.ts) is the whole removal. See ADR-CT-036.",
+  "supplierVerificationStatus": {
+    "PT Sumber Alam Nusantara": "verified",
+    "PT Distribusi Kosmetik Prima": "unverified",
+    "PT Test1": "verified"
+  }
+}

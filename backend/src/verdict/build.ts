@@ -15,7 +15,7 @@
 // docs/21_decisions.md ADR-CT-033), i.e. one compliance fact with two owners,
 // and the refusal landed on the Compliance Officer, who has no remedy.
 import { runScreeningForTargets, ENGINE_VERSION } from "../../../src/engine/index";
-import { activeDatasetRelease } from "../../../src/data/loadDatasetRelease";
+import { activeDatasetRelease, legacyRecordFacts } from "../../../src/data/loadDatasetRelease";
 import type { EvaluationTarget, ScreeningProfile } from "../../../src/engine/types";
 
 // Raw (snake_case, unserialized) shape of chaincode/batch.go's GetBatchTrail
@@ -239,11 +239,11 @@ function resolveSupplierVerificationStatus(
     return record.supplier_verification_status as SupplierVerificationStatus;
   }
 
-  const supplier = activeDatasetRelease.suppliers.find((s) => s.name === record.source_snapshot);
-  if (!supplier) {
+  const status = legacyRecordFacts.supplierVerificationStatus[record.source_snapshot];
+  if (!status) {
     throw new AttestationBuildError(
-      `ingredient record ${record.record_id} carries no supplier_verification_status (written before ADR-CT-033) and its supplier "${record.source_snapshot}" is not in dataset release ${activeDatasetRelease.releaseId} either -- nothing owns that compliance fact, so it cannot be bound into an attestation`,
+      `ingredient record ${record.record_id} carries no supplier_verification_status (written before ADR-CT-033) and its supplier "${record.source_snapshot}" is not in the pre-snapshot compatibility data either (dataset/releases/${activeDatasetRelease.releaseId}/legacy-record-facts.json) -- nothing owns that compliance fact, so it cannot be bound into an attestation`,
     );
   }
-  return supplier.verificationStatus;
+  return status;
 }

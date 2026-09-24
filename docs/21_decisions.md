@@ -377,3 +377,24 @@ Every `curl`-based verification in this project passes straight through both: cu
 **Reason:** A single-value origin makes the two ways of reaching the same app mutually exclusive, and it fails *silently in the browser only* — the exact class of defect this project's "prove it live" discipline exists to catch, which is also why it survived a dozen passing curl checks.
 
 **Consequence:** Locally, `frontend/.env.local` is now renamed to `.env.local.disabled-stale-tunnel` (recoverable, gitignored) and the frontend dev server reads the `http://localhost:3001/api/v1` default again; the backend lists both origins. `backend/src/index.test.ts` pins the parsing (default, single, list with whitespace). The symptom is recorded in `docs/24` §5's breakage table, because "the UI says the backend is unreachable while curl is fine" is now a known, one-minute fix rather than a mystery.
+
+## ADR-CT-036: Pre-snapshot compatibility data is its own file, not part of the release's vocabulary
+
+**Status:** Accepted and implemented (2026-09-24)
+
+**Context:** ADR-CT-033 removed the engine's dependence on a frozen dataset for the facts it evaluates, but left one shim in place: records written before supplier verification status was snapshotted have none, so the bridge falls back to looking the supplier up *in the release*. To keep one such batch evaluable, the release's `suppliers.json` and `ingredients.json` each gained an entry that came from the **ledger's governed reference list**, not from the screening vocabulary — and because the release is also what the screening app offers in its dropdowns, those entries showed up as selectable demo data. A public demo screenshot promptly contained `Test1`, a value whose only reason to exist is a single pre-2026-09-18 ledger record.
+
+That is the original defect of ADR-CT-033 in miniature: one file, three jobs (rules, screening vocabulary, compatibility shim), and the job with the weakest claim to the data winning the display.
+
+**Decision:** Move the shim into `dataset/releases/2026.07/legacy-record-facts.json`, a file that says what it is for, why it exists and when it can be deleted; remove those entries from `ingredients.json` and `suppliers.json`; and point `resolveSupplierVerificationStatus` at the new file. The release keeps the rules, the screening vocabulary and the recognition agreements. The two files may legitimately overlap (a canonical supplier can also be a pre-snapshot fact) but must never disagree, and a unit test now pins exactly that.
+
+**Alternatives considered:**
+
+- *Delete the entries.* Rejected: the pre-snapshot record they exist for is real and immutable, and without them its batch stops being evaluable — turning ADR-CT-033's one documented residual failure mode from theoretical into actual.
+- *Keep them in the release and hide them in the app's dropdowns.* Rejected on the project's own rule: this repository does not put a rule in the UI that has no home underneath it. A `demoVisible: false` flag would also have added a per-entry concept to the vocabulary for one old record's sake.
+- *Rename the entries to something presentable.* Impossible, and instructively so: the fallback matches a record's `source_snapshot` **by name**, so the name is the join key. Renaming would silently stop matching.
+- *Move the shim into chaincode as a fallback for records without a snapshot.* Rejected: it would put screening data in the ledger's authoritative module, and the ledger has no business knowing what a frozen release once said.
+
+**Reason:** The two files are frozen together but answer different questions — "what may this app offer, and what does the engine resolve?" versus "what did the governed list say on the day the snapshot rule took effect?". Separating them by purpose means the shim can be deleted in one step when the last pre-snapshot record stops mattering, and nothing else has to change.
+
+**Consequence:** The screening vocabulary no longer contains `Test1` or `PT Test1`; a live re-check confirmed the bridge still evaluates the pre-snapshot batch that needed them (via the new file), and `src/data/__tests__/datasetVocabulary.test.ts` fails if either file drifts — either by a compatibility-only value appearing in the vocabulary, or by the two disagreeing about a supplier they both name.
