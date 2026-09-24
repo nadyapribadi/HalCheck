@@ -87,7 +87,20 @@ is no update function to call.
 
 ## Try it
 
-**Live demo.** A quick tunnel can share the running app at a public URL:
+**Live, no install — two static pages** (no account, nothing uploaded):
+
+- **Screening app**: <https://nadyapribadi.github.io/HalCheck/> — the actual
+  rules engine: enter ingredients and suppliers, pick a market, read the
+  findings. Everything runs in your browser; there is no server behind it.
+- **Proof-bundle verifier**: <https://nadyapribadi.github.io/HalCheck/verify/>
+  — start with either sample: one intact bundle (verified, 7 checks) and the
+  same bundle with **one byte changed** (not verified, 2 checks fail). Or paste
+  a bundle of your own; nothing is uploaded anywhere.
+
+**The full Compliance Trail** (six roles, the ledger, the batch lifecycle)
+cannot be static, because it needs a Fabric network, Postgres, MinIO and the
+API. To share it live, a quick tunnel can expose the running app at a public
+URL:
 
 ```bash
 cloudflared tunnel --url http://localhost:5173     # prints a public https URL
