@@ -34,6 +34,9 @@ the BPJPH (Indonesia) and JAKIM (Malaysia) rule sets. You get one finding per
 rule, each with a plain-language explanation - for example: *"Cetyl Alcohol is
 sourced from a supplier that is not on the verified list."*
 
+![Screening results: overall Fail, one rule flagging the ingredient, and the
+rules that do not apply to this market shown explicitly.](docs/assets/screenshots/screening-findings.png)
+
 **Record the work, step by step.** The *Compliance Trail* is the part that
 creates an accountable history. Six roles each have their own login backed by a
 cryptographic identity, and a batch moves through them in a fixed order:
@@ -54,6 +57,10 @@ replaces - the original stays exactly as it was, and the trail shows both.
 
 Most software asks you to trust it. The point of this project is that it can
 hand you the evidence instead.
+
+![The recorded trail of a failed batch: an ingredient from an unverified
+supplier, a production record, and a signed Fail verdict naming the flagged
+record and its reason.](docs/assets/screenshots/trail-batch-detail.png)
 
 Every batch has a **proof bundle**: a small JSON file holding the batch's
 records, a digest computed from them, the signed verdict, and the public key
@@ -78,6 +85,9 @@ NOT VERIFIED -- 2 of 7 checks failed. Do not treat this bundle as evidence.
 
 That is the whole idea. Not that the software says the record is intact, but
 that a third party can prove it is - or prove it is not.
+
+![The integrity panel: every check passes, then one byte of one record is
+altered in memory and two of the seven checks fail.](docs/assets/screenshots/trail-integrity-tampered.png)
 
 The app also has a public **"Verify a proof bundle"** page that performs the
 same check in your browser, and an **Integrity Sandbox** that attempts to break
@@ -161,9 +171,11 @@ seed:users`, and the Hyperledger Fabric network is set up once by following
   Multi-party hosting is a non-goal of this version.
 - **Not finished.** The AI explanation feature is deliberately not connected to
   a model provider: with no key configured it says so instead of guessing, and
-  it can never write to a record. Verdicts recorded before 18 Sep 2026 carry no
-  stored attestation, and the verifier reports that as a note rather than
-  pretending it checked them.
+  it can never write to a record. Records written before 18 Sep 2026 carry
+  neither a supplier snapshot nor a stored attestation: the verdict bridge reads
+  an explicitly named compatibility file for them (`legacy-record-facts.json`,
+  ADR-CT-036) and the verifier reports the missing attestation as a note rather
+  than pretending it checked it.
 
 ## Under the hood
 
