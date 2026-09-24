@@ -1,0 +1,41 @@
+{
+  "bundleVersion": 1,
+  "generatedAt": "2026-09-24T07:09:20.074Z",
+  "batchId": "SL-2026-026",
+  "intendedMarket": "Malaysia",
+  "chaincode": {
+    "module": "batch",
+    "integrityFunction": "GetBatchIntegrity"
+  },
+  "integrity": {
+    "algorithm": "sha256",
+    "digestOrder": "ingredient records in ledger key order, then production records in ledger key order",
+    "effectiveInputDigest": "01a4ad24880c24f9ac87daa10a3f29b44c66583eb421edb55a252a9ea9c18fd7",
+    "records": [
+      {
+        "recordId": "c204f40abf7ffe372861837feed4fbd4f918084ded63336e5408df283b90f4f1",
+        "objectType": "ingredientRecord",
+        "sha256": "68aa6d93bfb0d48b3f71244c5663a5c216d794c09e674db1f8313835459c95b8",
+        "storedBytesBase64": "eyJyZWNvcmRfaWQiOiJjMjA0ZjQwYWJmN2ZmZTM3Mjg2MTgzN2ZlZWQ0ZmJkNGY5MTgwODRkZWQ2MzMzNmU1NDA4ZGYyODNiOTBmNGYxIiwiYmF0Y2hfaWQiOiJTTC0yMDI2LTAyNiIsImluZ3JlZGllbnRfbmFtZV9zbmFwc2hvdCI6IkVrc3RyYWsgVWppIEFEUjMzIiwiaW5ncmVkaWVudF9yZWZlcmVuY2VfZW50cnlfaWQiOiJcdTAwMDByZWZlcmVuY2VFbnRyeVx1MDAwMGluZ3JlZGllbnRcdTAwMDBFa3N0cmFrIFVqaSBBRFIzM1x1MDAwMDFcdTAwMDAiLCJpbmdyZWRpZW50X3JlZmVyZW5jZV92ZXJzaW9uIjoiMSIsInNvdXJjZV9zbmFwc2hvdCI6IlBUIFVqaSBBRFIzMyIsInN1cHBsaWVyX3JlZmVyZW5jZV9lbnRyeV9pZCI6Ilx1MDAwMHJlZmVyZW5jZUVudHJ5XHUwMDAwc3VwcGxpZXJcdTAwMDBQVCBVamkgQURSMzNcdTAwMDAyXHUwMDAwIiwic3VwcGxpZXJfcmVmZXJlbmNlX3ZlcnNpb24iOiIyIiwic3VwcGxpZXJfdmVyaWZpY2F0aW9uX3N0YXR1cyI6InZlcmlmaWVkIiwiaGFsYWxfcmlza19mbGFnIjp0cnVlLCJjb2FfZmlsZV9oYXNoIjoiMjFkMTBjZmIyMGQ2OWVmNjA4NGE1MzFlOTY0MjNkYzBmMDBjYjNkNzA5ZWVjMGI4ZjliYmI5ZGU1YmRjNjM2NSIsInRpbWVzdGFtcCI6IjIwMjYtMDktMThUMTU6MzA6NDhaIiwic3VibWl0dGVkX2J5IjoiZURVd09UbzZRMDQ5YVc1bmNtVmthV1Z1ZEMxeFlTeFBWVDFqYkdsbGJuUXNUejFJZVhCbGNteGxaR2RsY2l4VFZEMU9iM0owYUNCRFlYSnZiR2x1WVN4RFBWVlRPanBEVGoxallTNXZjbWN4TG1WNFlXMXdiR1V1WTI5dExFODliM0puTVM1bGVHRnRjR3hsTG1OdmJTeE1QVVIxY21oaGJTeFRWRDFPYjNKMGFDQkRZWEp2YkdsdVlTeERQVlZUInw="
+      },
+      {
+        "recordId": "86997c9dffae2d05bf97859046453a317c26638ec20acb7ae198e5c1a38e98e3",
+        "objectType": "productionRecord",
+        "sha256": "1ccca8048d196f28d59e52cb2cd2a7aa6bfe5c96ef92fc5e626d580c6bcddda4",
+        "storedBytesBase64": "eyJyZWNvcmRfaWQiOiI4Njk5N2M5ZGZmYWUyZDA1YmY5Nzg1OTA0NjQ1M2EzMTdjMjY2MzhlYzIwYWNiN2FlMTk4ZTVjMWEzOGU5OGUzIiwiYmF0Y2hfaWQiOiJTTC0yMDI2LTAyNiIsImJhdGNoX2RhdGUiOiIyMDI2LTA5LTE4VDE1OjMwOjUwWiIsImxpbmVfc2VncmVnYXRpb25fY29uZmlybWVkIjp0cnVlLCJzdGFuZGFyZF9zbmFwc2hvdCI6IkNQS0IiLCJzdGFuZGFyZF9yZWZlcmVuY2VfZW50cnlfaWQiOiJcdTAwMDByZWZlcmVuY2VFbnRyeVx1MDAwMHN0YW5kYXJkXHUwMDAwQ1BLQlx1MDAwMDFcdTAwMDAiLCJzdGFuZGFyZF9yZWZlcmVuY2VfdmVyc2lvbiI6IjEiLCJ0aW1lc3RhbXAiOiIyMDI2LTA5LTE4VDE1OjMwOjUwWiIsInN1Ym1pdHRlZF9ieSI6ImVEVXdPVG82UTA0OWNISnZaSFZqZEdsdmJpMXhZU3hQVlQxamJHbGxiblFzVHoxSWVYQmxjbXhsWkdkbGNpeFRWRDFPYjNKMGFDQkRZWEp2YkdsdVlTeERQVlZUT2pwRFRqMWpZUzV2Y21jeExtVjRZVzF3YkdVdVkyOXRMRTg5YjNKbk1TNWxlR0Z0Y0d4bExtTnZiU3hNUFVSMWNtaGhiU3hUVkQxT2IzSjBhQ0JEWVhKdmJHbHVZU3hEUFZWVCJ9"
+      }
+    ]
+  },
+  "verdicts": [
+    {
+      "recordId": "e3b03d305d68b189c584056de764389d956489ec025c12b77a8134bcd9c29576",
+      "status": "pass",
+      "engineVersion": "0.1.0",
+      "rulesRelease": "2026.07",
+      "timestamp": "2026-09-18T15:30:53Z",
+      "attestation": "{\"batch_id\":\"SL-2026-026\",\"input_digest\":\"01a4ad24880c24f9ac87daa10a3f29b44c66583eb421edb55a252a9ea9c18fd7\",\"intended_market\":\"Malaysia\",\"engine_version\":\"0.1.0\",\"rules_release\":\"2026.07\",\"result\":\"pass\",\"regulation_value\":\"JAKIM HC-2024\"}",
+      "attestationSignature": "MEUCIHQG66AnqBmO3yjjvHNM/w5oZ20jgKLwvhJbO1Ign+xqAiEA/RUu9FALuUbhqs5VrR/c6dfgzG4zCO9qiXXbLChZUv0="
+    }
+  ],
+  "attestationPublicKeyPem": "-----BEGIN PUBLIC KEY-----\nMFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAELaxgFn/pJwcCaNyj57eABcZR2lSn\np9LMHEAw0EgdFR5xg7eZuZvCeiX9XQ1Nj71Hw/uu2rI2bnPxAx6+TKf4TA==\n-----END PUBLIC KEY-----"
+}
